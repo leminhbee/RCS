@@ -1,0 +1,26 @@
+{
+  "name": "rcs",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "pm2 start ./src/index.js --name RCS --output ~/RCS/LOGS/out.log --error ~/RCS/LOGS/error.log",
+    "restart": "pm2 reload RCS --update-env",
+    "format": "prettier -w ."
+  },
+  "dependencies": {
+    "@ringcentral/sdk": "^5.0.5",
+    "axios": "^1.11.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsforce": "^3.10.1",
+    "moment": "^2.30.1",
+    "pino": "^9.7.0",
+    "pino-pretty": "^13.1.1",
+    "prettier": "^3.6.2",
+    "uuid": "^11.1.0"
+  }
+}
