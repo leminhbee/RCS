@@ -1,5 +1,6 @@
 const axios = require('axios');
-const logger = require('../helpers/logger');
+const { createLogger } = require('../helpers/logger');
+const logger = createLogger();
 const atp_url = process.env.ATP_URL;
 
 async function create(gotoId, startTime) {

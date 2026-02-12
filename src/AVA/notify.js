@@ -26,6 +26,19 @@ const late = async (slackId, userName, timeOver) => {
   }
 };
 
+const newChat = async (slackId, userName, timeOver) => {
+  try {
+    const { data } = await axios.post(`${AVA_URL}/notifications/`, {
+      slackId,
+      userName,
+      timeOver,
+    });
+    return data;
+  } catch (error) {
+    throw new Error('Error notifying admins about late: ' + error.message);
+  }
+};
+
 module.exports = {
   breakEnding,
   late,

@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Watch multiple RCS logs with readable formatting
+# Usage: ./watch-logs-multitail-readable.sh
+
+LOG_DIR="/home/ubuntu/RCS/LOGS"
+
+# Check if multitail is installed
+if ! command -v multitail &> /dev/null; then
+    echo "multitail not installed."
+    echo "Install with: sudo apt-get install multitail"
+    exit 1
+fi
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "jq not installed."
+    echo "Install with: sudo apt-get install jq"
+    exit 1
+fi
+
+echo "Starting multitail with readable RCS logs..."
+echo "Shortcuts:"
+echo "  b       - Select which window to show"
+echo "  q       - Quit"
+echo ""
+
+# Custom format: time | operation | key fields
+multitail \
+  --label "QUEUE" \
+  -l "tail -f $LOG_DIR/LOGS_QUEUE.json | jq -r '[.time, .operation, .callerNumber // \"N/A\", .metadata.reason // \"\"] | @tsv' | column -t -s $'\t'" \
+  --label "CALLS" \
+  -l "tail -f $LOG_DIR/LOGS_CALLS.json | jq -r '[.time, .operation, .subOperation // \"\", .ani // \"N/A\"] | @tsv' | column -t -s $'\t'" \
+  --label "STATUSES" \
+  -l "tail -f $LOG_DIR/LOGS_STATUSES.json | jq -r '[.time, .operation, .status // \"N/A\", .slackId // \"\"] | @tsv' | column -t -s $'\t'" \
+  --label "ERRORS" \
+  -l "tail -f $LOG_DIR/LOGS_ERRORS.json | jq -r '[.time, .domain, .operation, .error.message // \"N/A\"] | @tsv' | column -t -s $'\t'"

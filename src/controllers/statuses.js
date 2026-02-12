@@ -1,18 +1,39 @@
 const ava = require('../AVA');
-const logger = require('../helpers/logger');
+const { createStatusLog, formatError } = require('../helpers/log_schema');
 const moment = require('moment');
 
 const handleRequest = async (req, res) => {
+  const { messageId, logger } = req;
   const body = req.body;
   const user = body.alulaUser;
+
   try {
+    // Skip status updates for supervisors
+    if (body.isSupervisor) {
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          status: body.event_aux_type,
+          previousStatus: body.prev_aux_state,
+          data: {
+            message: 'Supervisor status change ignored',
+          },
+        })
+      );
+      return;
+    }
+
+    // Skip if no user found
+    if (!user) {
+      return;
+    }
     // Define a map for status updates based on event_aux_type
     const statusMap = {
-      'AVAILABLE': {
+      AVAILABLE: {
         statusText: `Available @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':large_green_circle:',
       },
-      'LUNCH': {
+      LUNCH: {
         statusText: `Lunch @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':hamburger:',
       },
@@ -20,15 +41,15 @@ const handleRequest = async (req, res) => {
         statusText: `Break @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':clock:',
       },
-      'TRAINING': {
+      TRAINING: {
         statusText: `Training @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':question-block:',
       },
-      'OUTBOUND': {
+      OUTBOUND: {
         statusText: `OUTBOUND @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':phone:',
       },
-      'Meeting': {
+      Meeting: {
         statusText: `Meeeting @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':spiral_calendar_pad:',
       },
@@ -44,31 +65,62 @@ const handleRequest = async (req, res) => {
         statusText: `Bathroom @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':toilet:',
       },
-      'ENGAGED' : {
+      ENGAGED: {
         statusText: `On Call @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':telephone_receiver:',
       },
-      'RNA-STATE' : {
+      'RNA-STATE': {
         statusText: `RNA @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':no_mobile_phones:',
       },
+      'LOGOUT': {
+        statusText: '',
+        statusEmoji: '',
+      },
+      'OFF-LINE': {
+        statusText: '',
+        statusEmoji: '',
+      },
     };
 
-    if (body.event_aux_type === 'ENGAGED' && body.prev_aux_state === 'OUTBOUND') {
+    if (body.event_aux_type === 'TRANSITION' || (body.event_aux_type === 'ENGAGED' && body.prev_aux_state === 'OUTBOUND')) {
       return;
-    };
+    }
 
-    if (statusMap[body.event_aux_type]){
+    if (statusMap[body.event_aux_type]) {
       ava.status.update({
         slackId: user.slackId,
         ...statusMap[body.event_aux_type],
       });
-      logger.info({ body, event: 'status update' });
+
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          userId: user.id,
+          slackId: user.slackId,
+          status: body.event_aux_type,
+          previousStatus: body.prev_aux_state,
+          data: {
+            statusText: statusMap[body.event_aux_type].statusText,
+            statusEmoji: statusMap[body.event_aux_type].statusEmoji,
+            userName: user.nameFirst,
+          },
+        })
+      );
     } else {
-      throw new Error('Unkown status set');
+      throw new Error('Unknown status set');
     }
   } catch (error) {
-    logger.error({ body, event: 'status update', error }, 'Error handling status webhook');
+    logger.error({
+      ...createStatusLog({
+        operation: 'update',
+        userId: user?.id,
+        slackId: user?.slackId,
+        status: body.event_aux_type,
+        previousStatus: body.prev_aux_state,
+      }),
+      ...formatError(error),
+    });
   }
 };
 

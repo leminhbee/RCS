@@ -3,6 +3,7 @@
 .env
 
 # Logs
+calls/
 LOGS
 logs
 *.log

@@ -1,36 +1,76 @@
 const pino = require('pino');
 
-const logDestination = '/home/ubuntu/RCS/LOGS/LOGS.json';
+const LOG_DIR = '/home/ubuntu/RCS/LOGS';
 
-const transport = pino.transport({
-  targets: [
+// Factory: createLogger('calls') → writes to LOGS_CALLS.json AND LOGS.json
+//          createLogger()        → writes to LOGS.json only (general/app)
+const createLogger = (domain = 'app') => {
+  const targets = [
     {
       level: 'info',
       target: 'pino/file',
       options: {
-        destination: logDestination,
-        translateTime: true, // Enable timestamp formatting
-        // Explicitly format in UTC:
+        destination: `${LOG_DIR}/LOGS.json`,
+        translateTime: true,
         ignoreTimeZone: true,
       },
     },
     {
-      level: 'info',
-      target: 'pino-pretty',
+      level: 'error',
+      target: 'pino/file',
       options: {
-        colorize: true,
-        translateTime: 'SYS:standard',
+        destination: `${LOG_DIR}/LOGS_ERRORS.json`,
+        translateTime: true,
+        ignoreTimeZone: true,
       },
     },
-  ],
-});
+  ];
 
-const logger = pino(
-  {
-    errorKey: 'error',
-    timestamp: () => `,"time":"${new Date(Date.now()).toISOString()}"`,
-  },
-  transport
-);
+  if (domain !== 'app') {
+    targets.push({
+      level: 'info',
+      target: 'pino/file',
+      options: {
+        destination: `${LOG_DIR}/LOGS_${domain.toUpperCase()}.json`,
+        translateTime: true,
+        ignoreTimeZone: true,
+      },
+    });
+  }
 
-module.exports = logger;
+  const transport = pino.transport({ targets });
+
+  return pino(
+    {
+      errorKey: 'error',
+      timestamp: () => `,"time":"${new Date(Date.now()).toISOString()}"`,
+    },
+    transport
+  );
+};
+
+// Console logger for development / testing (pino-pretty)
+const createPrettyLogger = () => {
+  const transport = pino.transport({
+    targets: [
+      {
+        level: 'info',
+        target: 'pino-pretty',
+        options: {
+          translateTime: true,
+          ignoreTimeZone: true,
+        },
+      },
+    ],
+  });
+
+  return pino(
+    {
+      errorKey: 'error',
+      timestamp: () => `,"time":"${new Date(Date.now()).toISOString()}"`,
+    },
+    transport
+  );
+};
+
+module.exports = { createLogger, createPrettyLogger };

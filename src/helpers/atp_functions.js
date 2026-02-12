@@ -1,5 +1,6 @@
 const atp = require('../ATP');
-const logger = require('./logger_calls');
+const { createLogger } = require('./logger');
+const logger = createLogger('calls');
 
 const createCall = async (createdCase, body) => {
   const callRecordCreated = await atp.calls.create({
@@ -11,7 +12,7 @@ const createCall = async (createdCase, body) => {
   });
   logger.info({ callRecordCreated }, 'Call record created');
   return callRecordCreated;
-}
+};
 
 const endCall = async (body) => {
   const callerNumber = body.ani;
@@ -19,12 +20,12 @@ const endCall = async (body) => {
     callerNumber: callerNumber,
     userId: body.alulaUser.id,
     status: 'ACTIVE',
-  })
+  });
 
   if (!activeCallRecord) {
     logger.error(`No active call record found for ANI: ${callerNumber}.`);
     activeCallRecord = await answer(req);
-  };
+  }
 
   const callDuration = endTime - activeCallRecord.startTime;
 
@@ -36,9 +37,9 @@ const endCall = async (body) => {
   });
 
   logger.info({ callRecordUpdated }, `Call record updated`);
-}
+};
 
 module.exports = {
   createCall,
-  endCall
-}
+  endCall,
+};

@@ -4,37 +4,40 @@ const { validate: isUUID } = require('uuid'); // Import the UUID validation func
 
 /**
  * Fetches a user record from the ATP API.
- *
- * @async
- * @function getUser
- * @param {(object|string)} params - The parameters for fetching the user.
- * @param {object} [params.filter] - A filter object to search for users (e.g., { email: 'example@email.com' }).
- * @param {string} [params] - A UUID string representing the user's ID.
- * @returns {Promise<object>} A promise that resolves with the user data.
- * @throws {Error} If an error occurs while fetching the user from the ATP API.
- * @throws {Error} If the provided `params` are invalid (not a valid filter object or UUID string).
- * @throws {Error} If the user is not found (404 error from the API).
+ * The function accepts a single 'params' parameter which can be one of two types:
+ * - A string: A valid UUID to fetch a user record by its unique ID.
+ * - An object: A filter object to find a user record that matches specific criteria.
+ * @param {string|object} params - The unique ID as a string or a filter object.
+ * @returns {Promise<object|null>} A promise that resolves to the fetched user data or null if not found.
+ * @throws {Error} If the provided `params` are invalid or a network error occurs.
  */
 async function fetchOne(params) {
   try {
     let response;
     if (typeof params === 'object' && params !== null) {
+      // Use the findOne endpoint for filter-based searches.
       response = await axios.get(`${atp_url}/users/findOne`, {
         params: { filter: params },
       });
+      // The API returns null for no results, so we can directly return the data.
+      return response.data;
     } else if (typeof params === 'string' && isUUID(params)) {
-      // Validate if it's a UUID
+      // Use the specific ID endpoint for UUID-based searches.
       response = await axios.get(`${atp_url}/users/${params}`);
+      // The API returns the user object if found.
+      return response.data;
     } else {
       throw new Error('Invalid params: Please provide a valid filter object or a UUID string.');
     }
-    return response.data;
   } catch (error) {
     if (error.response && error.response.status === 404) {
-      throw new Error('User not found');
+      // If the API returns a 404 (for a specific ID not found), return null.
+      return null;
     } else if (error.message.includes('Invalid params')) {
-      throw error; // Rethrow the custom error
+      // Rethrow the custom error for invalid input.
+      throw error;
     } else {
+      // Throw a generic error for network or unexpected issues.
       throw new Error('Error getting user record from ATP: ' + error.message);
     }
   }
