@@ -56,6 +56,53 @@ app.use((req, res, next) => {
   next();
 });
 
+// -- Find Call Record Middleware (finds existing call records for all routes except /queue/new) --
+app.use(async (req, res, next) => {
+  // Skip for /queue/new since that's where we create the record
+  if (req.originalUrl.startsWith('/queue/new')) {
+    req.callRecord = null;
+    return next();
+  }
+
+  const callerNumber = req.body.caller_number || req.body.ani;
+
+  if (!callerNumber) {
+    req.callRecord = null;
+    return next();
+  }
+
+  try {
+    // Try to find a call record with QUEUED status first
+    let callRecord = await atp.calls.fetchOne({
+      callerNumber: callerNumber,
+      status: 'QUEUED',
+    });
+
+    // If not found, try CALLBACK_REQUESTED
+    if (!callRecord) {
+      callRecord = await atp.calls.fetchOne({
+        callerNumber: callerNumber,
+        status: 'CALLBACK_REQUESTED',
+      });
+    }
+
+    // If still not found, try ACTIVE
+    if (!callRecord) {
+      callRecord = await atp.calls.fetchOne({
+        callerNumber: callerNumber,
+        status: 'ACTIVE',
+      });
+    }
+
+    req.callRecord = callRecord;
+  } catch (error) {
+    logger.error({ error, callerNumber, messageId: req.messageId }, 'Error finding call record in middleware');
+    req.callRecord = null;
+  }
+
+  next();
+});
+
 // --- Middleware function ---
 const alulaUserMiddleware = async (req, res, next) => {
   try {

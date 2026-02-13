@@ -52,7 +52,30 @@ const createCase = async (tech, body) => {
   return createdCase;
 };
 
+const createUnassignedCase = async (tech, callerNumber) => {
+  const formattedNumber = formatAsParentheses(callerNumber);
+  const data = {
+    Subject: callerNumber,
+    Technician_Phone__c: formattedNumber,
+    // OwnerId and CreatedById omitted - will default to API user
+  };
+
+  if (tech) {
+    data.AccountId = tech.AccountId;
+    data.First_Name__c = tech.First_Name__c;
+    data.Last_Name__c = tech.Last_Name__c;
+  }
+
+  const createdCase = await sfdcConn.sobject('Case').create(data);
+
+  if (createdCase.errors.length > 0) {
+    throw createdCase.errors[0];
+  }
+  return createdCase;
+};
+
 module.exports = {
   findTech,
   createCase,
+  createUnassignedCase,
 };
