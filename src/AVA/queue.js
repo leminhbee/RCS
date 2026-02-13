@@ -21,7 +21,6 @@ const add = async (callerNumber, messageId) => {
         messageId,
         data: {
           avaResponse: results.data,
-          timestamp: date.toISOString(),
         },
       })
     );
@@ -36,7 +35,6 @@ const add = async (callerNumber, messageId) => {
       }),
       ...formatError(error),
     });
-    throw new Error('Error adding to queue: ' + error.message);
   }
 };
 
@@ -58,7 +56,6 @@ const remove = async (callerNumber, messageId, reason, body) => {
         messageId,
         data: {
           avaResponse: results.data,
-          timestamp: date.toISOString(),
           ...(reason && { reason }),
           ...(body && { body }),
         },
@@ -75,7 +72,6 @@ const remove = async (callerNumber, messageId, reason, body) => {
       }),
       ...formatError(error),
     });
-    throw new Error('Error removing from queue: ' + error.message);
   }
 };
 
