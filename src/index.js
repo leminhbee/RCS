@@ -7,6 +7,7 @@ const atp = require('./ATP');
 const { v4: uuidv4 } = require('uuid');
 const { Mutex } = require('async-mutex');
 const xmlparser = require('express-xml-bodyparser');
+const { recoverWrapUps } = require('./helpers/wrapup_timers');
 
 // --- Configuration ---
 const app = express();
@@ -160,7 +161,7 @@ app.use((req, res, next) => {
 });
 
 // --- Start Server ---
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   logger.info(
     createAppLog({
       operation: 'startup',
@@ -170,4 +171,14 @@ app.listen(PORT, () => {
       },
     })
   );
+
+  // Recover any active wrap-up timers from before restart
+  try {
+    await recoverWrapUps(logger);
+  } catch (error) {
+    logger.error({
+      ...createAppLog({ operation: 'wrapup_recovery' }),
+      ...formatError(error),
+    });
+  }
 });

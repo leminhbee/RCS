@@ -10,14 +10,21 @@ const maskNumber = (number) => {
 
 const getData = async (req, res) => {
   try {
-    const [users, calls] = await Promise.all([
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [users, activeCalls, finishedCalls] = await Promise.all([
       atp.users.fetchAll({ callsActive: true }),
       atp.calls.fetchAll({ status: ['QUEUED', 'CALLBACK_REQUESTED', 'RINGING', 'ACTIVE'] }),
+      atp.calls.fetchAll({
+        status: ['COMPLETE', 'ABANDONED'],
+        startTimeAfter: todayStart.toISOString(),
+      }),
     ]);
 
     // Build a map of active calls keyed by userId
     const activeCallsByUser = {};
-    for (const call of calls) {
+    for (const call of activeCalls) {
       if ((call.status === 'ACTIVE' || call.status === 'RINGING') && call.userId) {
         activeCallsByUser[call.userId] = {
           callerNumber: maskNumber(call.callerNumber),
@@ -44,9 +51,9 @@ const getData = async (req, res) => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Queue: QUEUED and CALLBACK_REQUESTED calls, ordered by entry time
-    const queue = calls
-      .filter((c) => c.status === 'QUEUED' || c.status === 'CALLBACK_REQUESTED')
+    // Queue: QUEUED, CALLBACK_REQUESTED, and RINGING calls, ordered by entry time
+    const queue = activeCalls
+      .filter((c) => c.status === 'QUEUED' || c.status === 'CALLBACK_REQUESTED' || c.status === 'RINGING')
       .sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
       .map((c) => ({
         callerNumber: maskNumber(c.callerNumber),
@@ -54,9 +61,53 @@ const getData = async (req, res) => {
         companyName: c.companyName,
         startTime: c.startTime,
         callbackRequested: c.status === 'CALLBACK_REQUESTED',
+        ringing: c.status === 'RINGING',
       }));
 
-    res.json({ agents, queue });
+    // Stats: today's totals
+    const todayActive = activeCalls.filter((c) => new Date(c.startTime) >= todayStart);
+    const answered = finishedCalls.filter((c) => c.status === 'COMPLETE');
+    const abandoned = finishedCalls.filter((c) => c.status === 'ABANDONED');
+
+    const queueTimes = finishedCalls.map((c) => c.queueDuration).filter((d) => d != null);
+    const callDurations = answered.map((c) => c.duration).filter((d) => d != null);
+
+    const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0);
+
+    const stats = {
+      totalCalls: todayActive.length + finishedCalls.length,
+      totalAnswered: answered.length + todayActive.filter((c) => c.status === 'ACTIVE').length,
+      totalAbandoned: abandoned.length,
+      avgQueueTime: avg(queueTimes),
+      longestQueueTime: queueTimes.length ? Math.max(...queueTimes) : 0,
+      avgCallDuration: avg(callDurations),
+      longestCallDuration: callDurations.length ? Math.max(...callDurations) : 0,
+    };
+
+    // Call lists for dropdown views
+    const userMap = {};
+    for (const u of users) userMap[u.id] = u;
+
+    const mapCall = (c) => {
+      const agent = userMap[c.userId];
+      return {
+        callerName: c.callerName,
+        companyName: c.companyName,
+        agentName: agent ? `${agent.nameFirst} ${agent.nameLast}` : '--',
+        duration: c.duration,
+        queueDuration: c.queueDuration,
+        endTime: c.endTime,
+      };
+    };
+
+    const callLists = {
+      recentCalls: [...answered].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).slice(0, 5).map(mapCall),
+      longestCalls: [...answered].sort((a, b) => (b.duration || 0) - (a.duration || 0)).slice(0, 5).map(mapCall),
+      longestQueue: [...finishedCalls].sort((a, b) => (b.queueDuration || 0) - (a.queueDuration || 0)).slice(0, 5).map(mapCall),
+      abandonedCalls: [...abandoned].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).slice(0, 5).map(mapCall),
+    };
+
+    res.json({ agents, queue, stats, callLists });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }

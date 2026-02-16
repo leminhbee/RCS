@@ -46,11 +46,15 @@ const answer = async (req) => {
         })
       );
 
-      // Update call record with userId, status ACTIVE, and recording URL
+      const queueDuration = body.enqueue_time && body.dequeue_time
+        ? Math.round((new Date(body.dequeue_time) - new Date(body.enqueue_time)) / 1000)
+        : null;
+
       const updatedCallRecord = await atp.calls.update(callRecord.id, {
         userId: body.alulaUser.id,
         status: 'ACTIVE',
         callLink: body.call_recording,
+        queueDuration,
       });
 
       logger.info(
@@ -110,6 +114,9 @@ const answer = async (req) => {
           })
         );
       }
+      const queueDuration = body.enqueue_time && body.dequeue_time
+      ? Math.round((new Date(body.dequeue_time) - new Date(body.enqueue_time)) / 1000)
+      : null;
 
       const callRecordCreated = await atp.calls.create({
         callerNumber: body.ani,
@@ -122,6 +129,7 @@ const answer = async (req) => {
         startTime: new Date(),
         status: 'ACTIVE',
         callLink: body.call_recording,
+        queueDuration,
       });
 
       logger.info(
@@ -245,6 +253,7 @@ const end = async (req) => {
         },
       })
     );
+
   } catch (error) {
     logger.error({
       ...createCallLog({
