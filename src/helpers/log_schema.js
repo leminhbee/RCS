@@ -61,6 +61,7 @@ const createLogEntry = ({
  * @param {string} [params.subOperation] - Sub-operation (CASE_CREATED, CALL_RECORD_CREATED, etc.)
  * @param {string} params.messageId - Five9 message ID for correlation
  * @param {string} params.ani - Caller's phone number
+ * @param {string} [params.callId] - RingCentral call ID
  * @param {number} [params.userId] - Alula user ID
  * @param {string} [params.callerName] - Caller's name if known
  * @param {string} [params.caseId] - Salesforce case ID if applicable
@@ -73,6 +74,7 @@ const createCallLog = ({
   subOperation,
   messageId,
   ani,
+  callId,
   userId,
   callerName,
   caseId,
@@ -86,6 +88,7 @@ const createCallLog = ({
     correlationId: messageId,
     context: {
       ani,
+      ...(callId && { callId }),
       ...(userId && { userId }),
       ...(callerName && { callerName }),
       ...(caseId && { caseId }),
@@ -136,18 +139,26 @@ const createCaseLog = ({
  *
  * @param {Object} params
  * @param {string} params.operation - Operation type (add, remove, callback)
+ * @param {string} [params.subOperation] - Sub-operation detail
  * @param {string} [params.callerNumber] - Phone number in queue
  * @param {string} [params.messageId] - Correlation ID
+ * @param {string} [params.callId] - RingCentral call ID
+ * @param {string} [params.callRecordId] - ATP call record ID if applicable
+ * @param {string} [params.caseId] - Salesforce case ID if applicable
  * @param {Object} [params.data] - Additional data (AVA response, etc.)
  * @returns {Object} Structured queue log
  */
-const createQueueLog = ({ operation, callerNumber, messageId, data = {} }) => {
+const createQueueLog = ({ operation, subOperation, callerNumber, messageId, callId, callRecordId, caseId, data = {} }) => {
   return createLogEntry({
     domain: 'queue',
     operation,
+    subOperation,
     correlationId: messageId,
     context: {
       ...(callerNumber && { callerNumber }),
+      ...(callId && { callId }),
+      ...(callRecordId && { callRecordId }),
+      ...(caseId && { caseId }),
     },
     metadata: data,
   });
@@ -158,6 +169,7 @@ const createQueueLog = ({ operation, callerNumber, messageId, data = {} }) => {
  *
  * @param {Object} params
  * @param {string} params.operation - Operation type (update, change)
+ * @param {string} [params.messageId] - Correlation ID
  * @param {string} [params.userId] - Alula user ID
  * @param {string} [params.slackId] - Slack user ID
  * @param {string} [params.status] - New status value
@@ -167,6 +179,7 @@ const createQueueLog = ({ operation, callerNumber, messageId, data = {} }) => {
  */
 const createStatusLog = ({
   operation,
+  messageId,
   userId,
   slackId,
   status,
@@ -176,6 +189,7 @@ const createStatusLog = ({
   return createLogEntry({
     domain: 'statuses',
     operation,
+    correlationId: messageId,
     context: {
       ...(userId && { userId }),
       ...(slackId && { slackId }),

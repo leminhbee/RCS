@@ -1,6 +1,8 @@
 const ava = require('../AVA');
+const atp = require('../ATP');
 const { createStatusLog, formatError } = require('../helpers/log_schema');
 const moment = require('moment');
+const { isInWrapUp, clearWrapUp, startWrapUp } = require('../helpers/wrapup_timers');
 
 const handleRequest = async (req, res) => {
   const { messageId, logger } = req;
@@ -8,15 +10,21 @@ const handleRequest = async (req, res) => {
   const user = body.alulaUser;
 
   try {
-    // Skip status updates for supervisors
-    if (body.isSupervisor) {
+    // Skip Slack updates for supervisors, but persist status for dashboard
+    if (user.supervisor) {
+      atp.users.update(user.id, {
+        currentStatus: body.event_aux_type,
+        statusSince: new Date(),
+      });
+
       logger.info(
         createStatusLog({
           operation: 'update',
+          messageId,
           status: body.event_aux_type,
           previousStatus: body.prev_aux_state,
           data: {
-            message: 'Supervisor status change ignored',
+            message: 'Supervisor status change - Slack update skipped',
           },
         })
       );
@@ -73,6 +81,10 @@ const handleRequest = async (req, res) => {
         statusText: `RNA @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':no_mobile_phones:',
       },
+      RINGING: {
+        statusText: `Ringing @ ${moment(Date.now()).format('hh:mm a')}`,
+        statusEmoji: ':bell:',
+      },
       'LOGOUT': {
         statusText: '',
         statusEmoji: '',
@@ -81,10 +93,44 @@ const handleRequest = async (req, res) => {
         statusText: '',
         statusEmoji: '',
       },
+      'LOGIN': {
+        statusText: ``,
+        statusEmoji: '',
+      },
     };
 
     if (body.event_aux_type === 'TRANSITION' || (body.event_aux_type === 'ENGAGED' && body.prev_aux_state === 'OUTBOUND')) {
       return;
+    }
+
+    // ENGAGED -> AVAILABLE means a call just ended — start 2 minute wrap-up
+    if (body.event_aux_type === 'AVAILABLE' && body.prev_state === 'ENGAGED') {
+      startWrapUp(user, logger);
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          messageId,
+          userId: user.id,
+          status: 'WRAP-UP',
+          previousStatus: 'ENGAGED',
+          data: { message: 'Call ended — agent placed in WRAP-UP status' },
+        })
+      );
+      return;
+    }
+
+    // If agent is in wrap-up and changes to a non-AVAILABLE status, clear the timer
+    if (isInWrapUp(user.id)) {
+      clearWrapUp(user.id);
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          messageId,
+          userId: user.id,
+          status: body.event_aux_type,
+          data: { message: 'WRAP-UP timer cleared — agent changed status manually' },
+        })
+      );
     }
 
     if (statusMap[body.event_aux_type]) {
@@ -93,9 +139,15 @@ const handleRequest = async (req, res) => {
         ...statusMap[body.event_aux_type],
       });
 
+      atp.users.update(user.id, {
+        currentStatus: body.event_aux_type,
+        statusSince: new Date(),
+      });
+
       logger.info(
         createStatusLog({
           operation: 'update',
+          messageId,
           userId: user.id,
           slackId: user.slackId,
           status: body.event_aux_type,
@@ -114,6 +166,7 @@ const handleRequest = async (req, res) => {
     logger.error({
       ...createStatusLog({
         operation: 'update',
+        messageId,
         userId: user?.id,
         slackId: user?.slackId,
         status: body.event_aux_type,

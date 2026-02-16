@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Queue Dashboard</title>
+  <link rel="icon" type="image/png" href="black_ops_a.png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #e8eaed; }
+    h1 { color: #1779ba; }
+    .count { background: #1779ba; padding: 2px 10px; border-radius: 12px; font-size: 0.85rem; color: #fff; }
+    .empty { text-align: center; padding: 40px; color: #6b7280; }
+    .duration { font-variant-numeric: tabular-nums; }
+
+    /* Status badges */
+    .status { padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; display: inline-block; }
+    .status-available { background: #dcfce7; color: #166534; }
+    .status-engaged { background: #fee2e2; color: #991b1b; }
+    .status-lunch, .status-on-break, .status-bathroom-break { background: #fef3c7; color: #92400e; }
+    .status-training, .status-meeting, .status-follow-up, .status-email-support { background: #dbeafe; color: #1e40af; }
+    .status-outbound { background: #e0f2fe; color: #0369a1; }
+    .status-ringing { background: #fef9c3; color: #854d0e; }
+    .status-rna-state { background: #fce7f3; color: #9d174d; }
+    .status-wrap-up { background: #f3e8ff; color: #6b21a8; }
+    .status-login { background: #f3f4f6; color: #6b7280; }
+    .supervisor-tag { font-size: 0.7rem; background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }
+    .callback-tag { font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; }
+
+    /* Stats cards */
+    .stat-card { text-align: center; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-card .stat-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-top: 2px; }
+    .stat-card.stat-answered .stat-value { color: #166534; }
+    .stat-card.stat-abandoned .stat-value { color: #991b1b; }
+
+    /* Live cards */
+    .live-card { display: flex; align-items: center; justify-content: space-between; }
+    .live-label { font-size: 0.85rem; color: #6b7280; text-transform: uppercase; }
+    .live-value { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .live-detail { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
+
+    /* Call list dropdown */
+    .call-list-select { font-size: 1.1rem; font-weight: 600; background: transparent; border: none; cursor: pointer; font-family: inherit; }
+
+    /* Toggle button */
+    .theme-toggle { background: #d0d3d8; border: none; border-radius: 20px; width: 48px; height: 26px; cursor: pointer; display: flex; align-items: center; padding: 3px; transition: background 0.3s; flex-shrink: 0; }
+    .theme-toggle .knob { width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.3s; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+
+    /* Dark mode */
+    body.dark { background: #071323; color: #f0f2f3; --bs-body-color: #f0f2f3; --bs-body-bg: #071323; }
+    body.dark .card { background: #132133; border-color: #1779ba22; color: #f0f2f3; }
+    body.dark .card-header { background: #0e1a2b; border-color: #1779ba22; color: #fff; }
+    body.dark .card-body { color: #f0f2f3; }
+    body.dark .table { color: #f0f2f3; --bs-table-bg: transparent; --bs-table-color: #f0f2f3; --bs-table-striped-color: #f0f2f3; --bs-table-striped-bg: #0e1a2b; --bs-table-hover-color: #f0f2f3; --bs-table-hover-bg: #162740; border-color: #1a2d42; }
+    body.dark .table thead th { color: #787676; border-color: #1a2d42; }
+    body.dark .table td { border-color: #1a2d42; color: #f0f2f3; }
+    body.dark select, body.dark option { background: #132133; color: #f0f2f3; }
+    body.dark .empty { color: #787676; }
+    body.dark .status-available { background: #0a3d2a; color: #3adb76; }
+    body.dark .status-engaged { background: #4a1010; color: #f16036; }
+    body.dark .status-lunch, body.dark .status-on-break, body.dark .status-bathroom-break { background: #3d2e08; color: #ffae00; }
+    body.dark .status-training, body.dark .status-meeting, body.dark .status-follow-up, body.dark .status-email-support { background: #0c3483; color: #a2b6df; }
+    body.dark .status-outbound { background: #0a2944; color: #037fff; }
+    body.dark .status-ringing { background: #3d3408; color: #facc15; }
+    body.dark .status-rna-state { background: #2d1050; color: #cc4b37; }
+    body.dark .status-wrap-up { background: #2d1050; color: #c084fc; }
+    body.dark .status-login { background: #132133; color: #787676; }
+    body.dark .supervisor-tag { background: #1779ba33; color: #037fff; }
+    body.dark .callback-tag { background: #3d2e08; color: #ffae00; }
+    body.dark .live-value { color: #f0f2f3; }
+    body.dark .live-label, body.dark .live-detail { color: #787676; }
+    body.dark .stat-card .stat-value { color: #f0f2f3; }
+    body.dark .stat-card .stat-label { color: #787676; }
+    body.dark .stat-card.stat-answered .stat-value { color: #3adb76; }
+    body.dark .stat-card.stat-abandoned .stat-value { color: #f16036; }
+    body.dark .call-list-select { color: #fff; }
+    body.dark .theme-toggle { background: #1779ba; }
+    body.dark .theme-toggle .knob { transform: translateX(22px); }
+  </style>
+</head>
+<body>
+  <div class="container py-3" style="max-width: 1400px;">
+    <div class="d-flex justify-content-center align-items-center mb-4 position-relative">
+      <h1 class="mb-0">Queue Dashboard</h1>
+      <button class="theme-toggle position-absolute end-0" id="theme-toggle" title="Toggle dark mode">
+        <span class="knob" id="toggle-icon">&#9788;</span>
+      </button>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <strong>Agents</strong> <span class="count" id="agent-count">0</span>
+      </div>
+      <div class="card-body p-0" id="agents-table"></div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <strong>Queue</strong> <span class="count" id="queue-count">0</span>
+      </div>
+      <div class="card-body p-0" id="queue-table"></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-body live-card">
+            <div><div class="live-label">Longest Waiting</div><div class="live-detail" id="live-wait-detail">--</div></div>
+            <div class="live-value" id="live-wait-value">--</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-body live-card">
+            <div><div class="live-label">Longest Active Call</div><div class="live-detail" id="live-active-detail">--</div></div>
+            <div class="live-value" id="live-active-value">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header"><strong>Today's Stats</strong></div>
+      <div class="card-body">
+        <div class="row g-2 mb-3" id="stats-grid"></div>
+        <select class="call-list-select mb-2" id="call-list-select">
+          <option value="recentCalls">Recent Calls</option>
+          <option value="longestCalls">Longest Calls</option>
+          <option value="longestQueue">Longest Queue</option>
+          <option value="abandonedCalls">Abandoned Calls</option>
+        </select>
+        <div id="recent-calls-table"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let dashboardData = { agents: [], queue: [], stats: {}, callLists: {} };
+
+    // Theme toggle
+    const toggle = document.getElementById('theme-toggle');
+    const icon = document.getElementById('toggle-icon');
+    function applyTheme(dark) {
+      document.body.classList.toggle('dark', dark);
+      icon.innerHTML = dark ? '&#9790;' : '&#9788;';
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+    }
+    toggle.addEventListener('click', () => {
+      applyTheme(!document.body.classList.contains('dark'));
+    });
+    applyTheme(localStorage.getItem('theme') === 'dark');
+
+    function formatDuration(since) {
+      if (!since) return '--';
+      const seconds = Math.floor((Date.now() - new Date(since)) / 1000);
+      if (seconds < 0) return '0:00';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function statusClass(status) {
+      if (!status) return '';
+      return 'status-' + status.toLowerCase().replace(/[\s_]/g, '-');
+    }
+
+    function renderAgents() {
+      const container = document.getElementById('agents-table');
+      const agents = dashboardData.agents;
+      document.getElementById('agent-count').textContent = agents.length;
+
+      if (agents.length === 0) {
+        container.innerHTML = '<div class="empty">No agents logged in</div>';
+        return;
+      }
+
+      let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Name</th><th>Status</th><th>Duration</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Call Duration</th></tr></thead><tbody>';
+      for (const agent of agents) {
+        const sup = agent.supervisor ? '<span class="supervisor-tag">SUP</span>' : '';
+        html += `<tr>
+          <td>${agent.name}${sup}</td>
+          <td><span class="status ${statusClass(agent.status)}">${agent.status || '--'}</span></td>
+          <td class="duration">${formatDuration(agent.statusSince)}</td>
+          <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
+          <td>${agent.activeCall?.callerName || ''}</td>
+          <td>${agent.activeCall?.companyName || ''}</td>
+          <td class="duration">${agent.activeCall ? formatDuration(agent.activeCall.startTime) : ''}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function renderQueue() {
+      const container = document.getElementById('queue-table');
+      const queue = dashboardData.queue;
+      document.getElementById('queue-count').textContent = queue.length;
+
+      if (queue.length === 0) {
+        container.innerHTML = '<div class="empty">No callers in queue</div>';
+        return;
+      }
+
+      let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th><th>Status</th></tr></thead><tbody>';
+      for (let i = 0; i < queue.length; i++) {
+        const call = queue[i];
+        const tag = call.ringing ? '<span class="status status-ringing">Ringing</span>'
+          : call.callbackRequested ? '<span class="callback-tag">Callback</span>' : '';
+        html += `<tr>
+          <td>${i + 1}</td>
+          <td>${call.callerNumber || '--'}</td>
+          <td>${call.callerName || '--'}</td>
+          <td>${call.companyName || '--'}</td>
+          <td class="duration">${formatDuration(call.startTime)}</td>
+          <td>${tag}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function formatSeconds(sec) {
+      if (sec == null || sec === 0) return '--';
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function formatTimeAgo(time) {
+      if (!time) return '--';
+      const mins = Math.floor((Date.now() - new Date(time)) / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins === 1) return '1 min ago';
+      if (mins < 60) return `${mins} min ago`;
+      const h = Math.floor(mins / 60);
+      return `${h}h ${mins % 60}m ago`;
+    }
+
+    function renderLive() {
+      const queue = dashboardData.queue || [];
+      const waitEl = document.getElementById('live-wait-value');
+      if (queue.length > 0) {
+        const oldest = queue[0];
+        const waitSec = Math.floor((Date.now() - new Date(oldest.startTime)) / 1000);
+        waitEl.textContent = formatDuration(oldest.startTime);
+        waitEl.style.color = waitSec < 60 ? '#16a34a' : waitSec < 300 ? '#ca8a04' : '#dc2626';
+        document.getElementById('live-wait-detail').textContent = oldest.callerName || oldest.callerNumber || '--';
+      } else {
+        waitEl.textContent = '--';
+        waitEl.style.color = '';
+        document.getElementById('live-wait-detail').textContent = '--';
+      }
+
+      const agents = dashboardData.agents || [];
+      let longestAgent = null;
+      let longestStart = null;
+      for (const agent of agents) {
+        if (agent.activeCall) {
+          const t = new Date(agent.activeCall.startTime);
+          if (!longestStart || t < longestStart) {
+            longestStart = t;
+            longestAgent = agent;
+          }
+        }
+      }
+      if (longestAgent) {
+        document.getElementById('live-active-value').textContent = formatDuration(longestAgent.activeCall.startTime);
+        document.getElementById('live-active-detail').textContent = longestAgent.name;
+      } else {
+        document.getElementById('live-active-value').textContent = '--';
+        document.getElementById('live-active-detail').textContent = '--';
+      }
+    }
+
+    function renderStats() {
+      const s = dashboardData.stats || {};
+      const grid = document.getElementById('stats-grid');
+      const cards = [
+        { value: s.totalCalls || 0, label: 'Total Calls', cls: '' },
+        { value: s.totalAnswered || 0, label: 'Answered', cls: 'stat-answered' },
+        { value: s.totalAbandoned || 0, label: 'Abandoned', cls: 'stat-abandoned' },
+        { value: formatSeconds(s.avgQueueTime), label: 'Avg Queue', cls: '' },
+        { value: formatSeconds(s.longestQueueTime), label: 'Longest Queue', cls: '' },
+        { value: formatSeconds(s.avgCallDuration), label: 'Avg Call', cls: '' },
+        { value: formatSeconds(s.longestCallDuration), label: 'Longest Call', cls: '' },
+      ];
+      grid.innerHTML = cards.map(c => `
+        <div class="col"><div class="card stat-card ${c.cls} p-2">
+          <div class="stat-value">${c.value}</div>
+          <div class="stat-label">${c.label}</div>
+        </div></div>
+      `).join('');
+    }
+
+    function renderCallList() {
+      const container = document.getElementById('recent-calls-table');
+      const selected = document.getElementById('call-list-select').value;
+      const calls = (dashboardData.callLists || {})[selected] || [];
+
+      if (calls.length === 0) {
+        container.innerHTML = '<div class="empty">No calls to display</div>';
+        return;
+      }
+
+      let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Caller</th><th>Company</th><th>Agent</th><th>Call Duration</th><th>Queue Wait</th><th>Ended</th></tr></thead><tbody>';
+      for (const call of calls) {
+        html += `<tr>
+          <td>${call.callerName || '--'}</td>
+          <td>${call.companyName || '--'}</td>
+          <td>${call.agentName || '--'}</td>
+          <td>${formatSeconds(call.duration)}</td>
+          <td>${formatSeconds(call.queueDuration)}</td>
+          <td>${formatTimeAgo(call.endTime)}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    document.getElementById('call-list-select').addEventListener('change', renderCallList);
+
+    function render() {
+      renderAgents();
+      renderQueue();
+      renderLive();
+      renderStats();
+      renderCallList();
+    }
+
+    // -- WebSocket connection with auto-reconnect --
+    let ws = null;
+    let reconnectTimer = null;
+
+    function connectWebSocket() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const basePath = location.pathname.replace(/\/$/, '');
+      const wsUrl = `${protocol}//${location.host}${basePath}/ws`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.addEventListener('open', () => {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      });
+
+      ws.addEventListener('message', (event) => {
+        try {
+          dashboardData = JSON.parse(event.data);
+          render();
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        if (!reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connectWebSocket();
+          }, 3000);
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        ws.close();
+      });
+    }
+
+    // Update ticking timers every 1 second
+    setInterval(render, 1000);
+    // Connect WebSocket
+    connectWebSocket();
+  </script>
+</body>
+</html>

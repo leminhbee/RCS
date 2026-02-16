@@ -7,6 +7,9 @@ const atp = require('./ATP');
 const { v4: uuidv4 } = require('uuid');
 const { Mutex } = require('async-mutex');
 const xmlparser = require('express-xml-bodyparser');
+const http = require('http');
+const { recoverWrapUps } = require('./helpers/wrapup_timers');
+const websocket = require('./helpers/websocket');
 
 // --- Configuration ---
 const app = express();
@@ -20,6 +23,13 @@ app.use(express.json());
 app.use(express.text({ type: 'text/json' }));
 // XML (parse into JS object)
 app.use(xmlparser({ explicitArray: false, type: ['application/xml', 'text/xml'] }));
+
+// -- Dashboard (before mutex - read-only, bypasses webhook processing) --
+const path = require('path');
+const dashboardRouter = require('./routes/dashboard');
+const dashboardPath = `/dashboard/${process.env.DASHBOARD_KEY}`;
+app.use(dashboardPath, express.static(path.join(__dirname, '../public')));
+app.use(dashboardPath, dashboardRouter);
 
 // -- Message ID Middleware --
 app.use((req, res, next) => {
@@ -56,22 +66,34 @@ app.use((req, res, next) => {
   next();
 });
 
+// -- Find Call Record Middleware --
+app.use(async (req, res, next) => {
+  const callId = req.body.call_id;
+
+  if (!callId) {
+    req.callRecord = null;
+    return next();
+  }
+
+  try {
+    const callRecord = await atp.calls.fetchOne({ callId });
+    req.callRecord = callRecord;
+  } catch (error) {
+    logger.error({ error, callId, messageId: req.messageId }, 'Error finding call record in middleware');
+    req.callRecord = null;
+  }
+
+  next();
+});
+
 // --- Middleware function ---
 const alulaUserMiddleware = async (req, res, next) => {
   try {
-    const supervisors = ['861', '1230'];
-
     if (req.body.event_type && !req.body.event_aux_type) {
       req.body.event_aux_type = req.body.event_type;
     }
 
     const agentId = req.body.agent_id;
-
-    if (supervisors.includes(agentId)) {
-      req.body.isSupervisor = true;
-      req.body.alulaUser = null;
-      return next();
-    }
 
     req.body.alulaUser = await atp.users.fetchOne({ rcId: agentId });
 
@@ -141,7 +163,10 @@ app.use((req, res, next) => {
 });
 
 // --- Start Server ---
-app.listen(PORT, () => {
+const server = http.createServer(app);
+websocket.init(server, process.env.DASHBOARD_KEY);
+
+server.listen(PORT, async () => {
   logger.info(
     createAppLog({
       operation: 'startup',
@@ -151,4 +176,14 @@ app.listen(PORT, () => {
       },
     })
   );
+
+  // Recover any active wrap-up timers from before restart
+  try {
+    await recoverWrapUps(logger);
+  } catch (error) {
+    logger.error({
+      ...createAppLog({ operation: 'wrapup_recovery' }),
+      ...formatError(error),
+    });
+  }
 });
