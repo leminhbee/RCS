@@ -7,7 +7,9 @@ const atp = require('./ATP');
 const { v4: uuidv4 } = require('uuid');
 const { Mutex } = require('async-mutex');
 const xmlparser = require('express-xml-bodyparser');
+const http = require('http');
 const { recoverWrapUps } = require('./helpers/wrapup_timers');
+const websocket = require('./helpers/websocket');
 
 // --- Configuration ---
 const app = express();
@@ -161,7 +163,10 @@ app.use((req, res, next) => {
 });
 
 // --- Start Server ---
-app.listen(PORT, async () => {
+const server = http.createServer(app);
+websocket.init(server, process.env.DASHBOARD_KEY);
+
+server.listen(PORT, async () => {
   logger.info(
     createAppLog({
       operation: 'startup',

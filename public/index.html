@@ -331,23 +331,51 @@
       renderCallList();
     }
 
-    async function fetchData() {
-      try {
-        const res = await fetch('api');
-        if (res.ok) {
-          dashboardData = await res.json();
+    // -- WebSocket connection with auto-reconnect --
+    let ws = null;
+    let reconnectTimer = null;
+
+    function connectWebSocket() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const basePath = location.pathname.replace(/\/$/, '');
+      const wsUrl = `${protocol}//${location.host}${basePath}/ws`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.addEventListener('open', () => {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
         }
-      } catch (e) {
-        // Silently retry on next interval
-      }
+      });
+
+      ws.addEventListener('message', (event) => {
+        try {
+          dashboardData = JSON.parse(event.data);
+          render();
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        if (!reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connectWebSocket();
+          }, 3000);
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        ws.close();
+      });
     }
 
-    // Poll API every 3 seconds
-    setInterval(fetchData, 3000);
-    // Update timers every 1 second
+    // Update ticking timers every 1 second
     setInterval(render, 1000);
-    // Initial fetch
-    fetchData().then(render);
+    // Connect WebSocket
+    connectWebSocket();
   </script>
 </body>
 </html>

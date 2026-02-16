@@ -10,11 +10,6 @@ const answer = async (req) => {
   const { messageId, body, logger, callRecord } = req;
 
   try {
-    // Remove from queue first, before any user checks
-    if (!req.retry) {
-      await ava.queue.remove(body.ani, messageId, 'CALL_ANSWERED', body);
-    }
-
     // Regular user checks
     if (!body.alulaUser?.callsActive) return; // Early return if user is not activated for call tracking
 

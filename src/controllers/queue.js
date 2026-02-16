@@ -1,4 +1,3 @@
-const ava = require('../AVA');
 const { createQueueLog, formatError } = require('../helpers/log_schema');
 const sfdcFunctions = require('../helpers/sfdc_functions');
 const { sfdcConn } = require('../config/sfdc');
@@ -9,9 +8,6 @@ const add = async (req) => {
   const callerNumber = body.caller_number;
 
   try {
-    // 1. Add to AVA queue first
-    await ava.queue.add(callerNumber, messageId);
-
     logger.info(
       createQueueLog({
         operation: 'add',
@@ -108,9 +104,6 @@ const remove = async (req) => {
     const isAbandoned = body.call_result === 'ABANDON';
 
     if (isAbandoned) {
-      // Remove from AVA queue
-      await ava.queue.remove(callerNumber, messageId, body.call_result, body);
-
       logger.info(
         createQueueLog({
           operation: 'remove',

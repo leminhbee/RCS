@@ -1,6 +1,7 @@
 const ava = require('../AVA');
 const atp = require('../ATP');
 const moment = require('moment');
+const { broadcast } = require('./websocket');
 
 const WRAPUP_DURATION = 2 * 60 * 1000; // 2 minutes in ms
 
@@ -17,6 +18,7 @@ function setAvailable(user) {
     currentStatus: 'AVAILABLE',
     statusSince: new Date(),
   });
+  broadcast();
 }
 
 function startWrapUp(user, logger, delay = WRAPUP_DURATION) {
