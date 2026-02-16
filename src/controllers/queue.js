@@ -5,7 +5,7 @@ const { sfdcConn } = require('../config/sfdc');
 const atp = require('../ATP');
 
 const add = async (req) => {
-  const { messageId, body, logger } = req;
+  const { messageId, body, logger, callRecord } = req;
   const callerNumber = body.caller_number;
 
   try {
@@ -17,6 +17,7 @@ const add = async (req) => {
         operation: 'add',
         callerNumber,
         messageId,
+        callId: body.call_id,
         data: {
           source: 'queue_endpoint',
           body,
@@ -25,23 +26,19 @@ const add = async (req) => {
     );
 
     // 2. Check for existing call record (idempotency)
-    const existingCall = await atp.calls.fetchOne({
-      callerNumber: callerNumber,
-      status: 'QUEUED',
-    });
-
-    if (existingCall) {
+    if (callRecord) {
       logger.info(
         createQueueLog({
           operation: 'add',
           subOperation: 'DUPLICATE_QUEUE_WEBHOOK',
           callerNumber,
           messageId,
-          callRecordId: existingCall.id,
+          callId: body.call_id,
+          callRecordId: callRecord.id,
           data: { message: 'Call record already exists, skipping creation' },
         })
       );
-      return existingCall;
+      return callRecord;
     }
 
     // 3. Create unassigned Salesforce case and ATP call record
@@ -56,6 +53,7 @@ const add = async (req) => {
         subOperation: 'CASE_CREATED',
         callerNumber,
         messageId,
+        callId: body.call_id,
         caseId: caseRecord.id,
         data: { caseRecord },
       })
@@ -64,7 +62,9 @@ const add = async (req) => {
     // Create ATP call record with QUEUED status (no userId yet)
     const callRecordCreated = await atp.calls.create({
       callerNumber: callerNumber,
+      callId: body.call_id,
       callerName: tech ? `${tech.First_Name__c} ${tech.Last_Name__c}` : null,
+      companyName: tech?.Account?.Name || null,
       userId: null,
       caseCreated: true,
       salesforceCaseId: caseRecord.id,
@@ -79,6 +79,7 @@ const add = async (req) => {
         subOperation: 'CALL_RECORD_CREATED',
         callerNumber,
         messageId,
+        callId: body.call_id,
         callRecordId: callRecordCreated.id,
         data: { callRecordCreated },
       })
@@ -92,6 +93,7 @@ const add = async (req) => {
         operation: 'add',
         callerNumber,
         messageId,
+        callId: body.call_id,
       }),
       ...formatError(error),
     });
@@ -114,6 +116,7 @@ const remove = async (req) => {
           operation: 'remove',
           callerNumber,
           messageId,
+          callId: body.call_id,
           data: {
             reason: body.call_result,
             hasRecording: body.recording_url ? body.recording_url.length > 0 : false,
@@ -137,6 +140,7 @@ const remove = async (req) => {
             subOperation: 'CASE_CLOSED',
             callerNumber,
             messageId,
+            callId: body.call_id,
             caseId: callRecord.salesforceCaseId,
             data: { reason: 'Call abandoned' },
           })
@@ -154,6 +158,7 @@ const remove = async (req) => {
             subOperation: 'CALL_ABANDONED',
             callerNumber,
             messageId,
+            callId: body.call_id,
             callRecordId: callRecord.id,
             data: { reason: body.call_result },
           })
@@ -165,6 +170,7 @@ const remove = async (req) => {
             subOperation: 'NO_CALL_RECORD',
             callerNumber,
             messageId,
+            callId: body.call_id,
             data: { message: 'No call record found for abandoned call' },
           })
         );
@@ -176,6 +182,7 @@ const remove = async (req) => {
           operation: 'remove',
           callerNumber,
           messageId,
+          callId: body.call_id,
           data: {
             reason: body.call_result,
             message: 'Queue completed (not abandoned)',
@@ -189,6 +196,7 @@ const remove = async (req) => {
         operation: 'remove',
         callerNumber,
         messageId,
+        callId: body.call_id,
       }),
       ...formatError(error),
     });
@@ -207,6 +215,7 @@ const callback = async (req) => {
         operation: 'callback',
         callerNumber,
         messageId,
+        callId: body.call_id,
         data: {
           source: 'callback_endpoint',
           body,
@@ -226,6 +235,7 @@ const callback = async (req) => {
           subOperation: 'CALLBACK_REQUESTED',
           callerNumber,
           messageId,
+          callId: body.call_id,
           callRecordId: callRecord.id,
           data: { message: 'Call record updated to CALLBACK_REQUESTED' },
         })
@@ -237,6 +247,7 @@ const callback = async (req) => {
           subOperation: 'NO_CALL_RECORD',
           callerNumber,
           messageId,
+          callId: body.call_id,
           data: { message: 'No call record found to update' },
         })
       );
@@ -247,6 +258,7 @@ const callback = async (req) => {
         operation: 'callback',
         callerNumber,
         messageId,
+        callId: body.call_id,
       }),
       ...formatError(error),
     });

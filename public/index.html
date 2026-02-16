@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Queue Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #e8eaed; color: #1a1a1a; padding: 20px; transition: background 0.3s, color 0.3s; }
+    h1 { text-align: center; margin-bottom: 20px; color: #1779ba; font-size: 1.5rem; }
+    .container { display: flex; flex-direction: column; gap: 20px; max-width: 1400px; margin: 0 auto; }
+    .panel { flex: 1; background: #fff; border-radius: 8px; padding: 16px; border: 1px solid #d0d3d8; transition: background 0.3s, border-color 0.3s; }
+    .panel h2 { font-size: 1.1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: #1a1a1a; transition: color 0.3s; }
+    .panel h2 .count { background: #1779ba; padding: 2px 10px; border-radius: 12px; font-size: 0.85rem; color: #fff; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #1779ba44; font-size: 0.8rem; text-transform: uppercase; color: #6b7280; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e8eaed; font-size: 0.9rem; color: #1a1a1a; transition: color 0.3s, border-color 0.3s; }
+    tr:last-child td { border-bottom: none; }
+    .empty { text-align: center; padding: 40px; color: #6b7280; }
+
+    /* Status colors */
+    .status { padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; display: inline-block; }
+    .status-available { background: #dcfce7; color: #166534; }
+    .status-engaged { background: #fee2e2; color: #991b1b; }
+    .status-lunch, .status-on-break, .status-bathroom-break { background: #fef3c7; color: #92400e; }
+    .status-training, .status-meeting, .status-follow-up, .status-email-support { background: #dbeafe; color: #1e40af; }
+    .status-outbound { background: #e0f2fe; color: #0369a1; }
+    .status-ringing { background: #fef9c3; color: #854d0e; }
+    .status-rna-state { background: #fce7f3; color: #9d174d; }
+    .status-login { background: #f3f4f6; color: #6b7280; }
+    .supervisor-tag { font-size: 0.7rem; background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }
+    .callback-tag { font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; }
+    .duration { font-variant-numeric: tabular-nums; }
+
+    /* Toggle button */
+    .theme-toggle { position: fixed; top: 16px; right: 20px; background: #d0d3d8; border: none; border-radius: 20px; width: 48px; height: 26px; cursor: pointer; display: flex; align-items: center; padding: 3px; transition: background 0.3s; }
+    .theme-toggle .knob { width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.3s; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+
+    /* Dark mode */
+    body.dark { background: #071323; color: #f0f2f3; }
+    body.dark .panel { background: #132133; border-color: #1779ba22; }
+    body.dark .panel h2 { color: #fff; }
+    body.dark th { color: #787676; }
+    body.dark td { color: #f0f2f3; border-bottom-color: #132133; }
+    body.dark .empty { color: #787676; }
+    body.dark .status-available { background: #0a3d2a; color: #3adb76; }
+    body.dark .status-engaged { background: #4a1010; color: #f16036; }
+    body.dark .status-lunch, body.dark .status-on-break, body.dark .status-bathroom-break { background: #3d2e08; color: #ffae00; }
+    body.dark .status-training, body.dark .status-meeting, body.dark .status-follow-up, body.dark .status-email-support { background: #0c3483; color: #a2b6df; }
+    body.dark .status-outbound { background: #0a2944; color: #037fff; }
+    body.dark .status-ringing { background: #3d3408; color: #facc15; }
+    body.dark .status-rna-state { background: #2d1050; color: #cc4b37; }
+    body.dark .status-login { background: #132133; color: #787676; }
+    body.dark .supervisor-tag { background: #1779ba33; color: #037fff; }
+    body.dark .callback-tag { background: #3d2e08; color: #ffae00; }
+    body.dark .theme-toggle { background: #1779ba; }
+    body.dark .theme-toggle .knob { transform: translateX(22px); }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode">
+    <span class="knob" id="toggle-icon">&#9788;</span>
+  </button>
+  <h1>Queue Dashboard</h1>
+  <div class="container">
+    <div class="panel">
+      <h2>Agents <span class="count" id="agent-count">0</span></h2>
+      <div id="agents-table"></div>
+    </div>
+    <div class="panel">
+      <h2>Queue <span class="count" id="queue-count">0</span></h2>
+      <div id="queue-table"></div>
+    </div>
+  </div>
+
+  <script>
+    let dashboardData = { agents: [], queue: [] };
+
+    // Theme toggle
+    const toggle = document.getElementById('theme-toggle');
+    const icon = document.getElementById('toggle-icon');
+    function applyTheme(dark) {
+      document.body.classList.toggle('dark', dark);
+      icon.innerHTML = dark ? '&#9790;' : '&#9788;';
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+    }
+    toggle.addEventListener('click', () => {
+      applyTheme(!document.body.classList.contains('dark'));
+    });
+    applyTheme(localStorage.getItem('theme') === 'dark');
+
+    function formatDuration(since) {
+      if (!since) return '--';
+      const seconds = Math.floor((Date.now() - new Date(since)) / 1000);
+      if (seconds < 0) return '0:00';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function statusClass(status) {
+      if (!status) return '';
+      return 'status-' + status.toLowerCase().replace(/[\s_]/g, '-');
+    }
+
+    function renderAgents() {
+      const container = document.getElementById('agents-table');
+      const agents = dashboardData.agents;
+      document.getElementById('agent-count').textContent = agents.length;
+
+      if (agents.length === 0) {
+        container.innerHTML = '<div class="empty">No agents logged in</div>';
+        return;
+      }
+
+      let html = '<table><thead><tr><th>Name</th><th>Status</th><th>Duration</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Call Duration</th></tr></thead><tbody>';
+      for (const agent of agents) {
+        const sup = agent.supervisor ? '<span class="supervisor-tag">SUP</span>' : '';
+        html += `<tr>
+          <td>${agent.name}${sup}</td>
+          <td><span class="status ${statusClass(agent.status)}">${agent.status || '--'}</span></td>
+          <td class="duration">${formatDuration(agent.statusSince)}</td>
+          <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
+          <td>${agent.activeCall?.callerName || ''}</td>
+          <td>${agent.activeCall?.companyName || ''}</td>
+          <td class="duration">${agent.activeCall ? formatDuration(agent.activeCall.startTime) : ''}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function renderQueue() {
+      const container = document.getElementById('queue-table');
+      const queue = dashboardData.queue;
+      document.getElementById('queue-count').textContent = queue.length;
+
+      if (queue.length === 0) {
+        container.innerHTML = '<div class="empty">No callers in queue</div>';
+        return;
+      }
+
+      let html = '<table><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th><th>Callback</th></tr></thead><tbody>';
+      for (let i = 0; i < queue.length; i++) {
+        const call = queue[i];
+        const cb = call.callbackRequested ? '<span class="callback-tag">Callback</span>' : '';
+        html += `<tr>
+          <td>${i + 1}</td>
+          <td>${call.callerNumber || '--'}</td>
+          <td>${call.callerName || '--'}</td>
+          <td>${call.companyName || '--'}</td>
+          <td class="duration">${formatDuration(call.startTime)}</td>
+          <td>${cb}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function render() {
+      renderAgents();
+      renderQueue();
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch('api');
+        if (res.ok) {
+          dashboardData = await res.json();
+        }
+      } catch (e) {
+        // Silently retry on next interval
+      }
+    }
+
+    // Poll API every 3 seconds
+    setInterval(fetchData, 3000);
+    // Update timers every 1 second
+    setInterval(render, 1000);
+    // Initial fetch
+    fetchData().then(render);
+  </script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 const ava = require('../AVA');
+const atp = require('../ATP');
 const { createStatusLog, formatError } = require('../helpers/log_schema');
 const moment = require('moment');
 
@@ -8,15 +9,21 @@ const handleRequest = async (req, res) => {
   const user = body.alulaUser;
 
   try {
-    // Skip status updates for supervisors
-    if (body.isSupervisor) {
+    // Skip Slack updates for supervisors, but persist status for dashboard
+    if (user.supervisor) {
+      atp.users.update(user.id, {
+        currentStatus: body.event_aux_type,
+        statusSince: new Date(),
+      });
+
       logger.info(
         createStatusLog({
           operation: 'update',
+          messageId,
           status: body.event_aux_type,
           previousStatus: body.prev_aux_state,
           data: {
-            message: 'Supervisor status change ignored',
+            message: 'Supervisor status change - Slack update skipped',
           },
         })
       );
@@ -73,12 +80,20 @@ const handleRequest = async (req, res) => {
         statusText: `RNA @ ${moment(Date.now()).format('hh:mm a')}`,
         statusEmoji: ':no_mobile_phones:',
       },
+      RINGING: {
+        statusText: `Ringing @ ${moment(Date.now()).format('hh:mm a')}`,
+        statusEmoji: ':bell:',
+      },
       'LOGOUT': {
         statusText: '',
         statusEmoji: '',
       },
       'OFF-LINE': {
         statusText: '',
+        statusEmoji: '',
+      },
+      'LOGIN': {
+        statusText: ``,
         statusEmoji: '',
       },
     };
@@ -93,9 +108,15 @@ const handleRequest = async (req, res) => {
         ...statusMap[body.event_aux_type],
       });
 
+      atp.users.update(user.id, {
+        currentStatus: body.event_aux_type,
+        statusSince: new Date(),
+      });
+
       logger.info(
         createStatusLog({
           operation: 'update',
+          messageId,
           userId: user.id,
           slackId: user.slackId,
           status: body.event_aux_type,
@@ -114,6 +135,7 @@ const handleRequest = async (req, res) => {
     logger.error({
       ...createStatusLog({
         operation: 'update',
+        messageId,
         userId: user?.id,
         slackId: user?.slackId,
         status: body.event_aux_type,

@@ -11,10 +11,11 @@ const findTech = async (number, commonLog, logger) => {
   try {
     const formattedNumber = formatAsParentheses(number);
 
-    const soqlQuery = `SELECT Id, CaseNumber, Subject, Status, First_Name__c, Last_Name__c, AccountId
+    const soqlQuery = `SELECT Id, CaseNumber, Subject, Status, First_Name__c, Last_Name__c, AccountId, Account.Name
                       FROM Case
                       WHERE Technician_Phone__c = '${number}'
                       OR Technician_Phone__c = '${formattedNumber}'
+                      ORDER BY CreatedDate DESC
                       LIMIT 1`;
     const result = await sfdcConn.query(soqlQuery);
 

@@ -3,6 +3,7 @@ const sfdcFunctions = require('../helpers/sfdc_functions');
 const { createCallLog, formatError } = require('../helpers/log_schema');
 const atp = require('../ATP');
 const ava = require('../AVA');
+const moment = require('moment');
 
 
 const answer = async (req) => {
@@ -34,6 +35,7 @@ const answer = async (req) => {
           subOperation: 'CASE_UPDATED',
           messageId,
           ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
           caseId: callRecord.salesforceCaseId,
           data: {
@@ -57,6 +59,7 @@ const answer = async (req) => {
           subOperation: 'CALL_RECORD_UPDATED',
           messageId,
           ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
           callRecordId: callRecord.id,
           data: {
@@ -75,6 +78,7 @@ const answer = async (req) => {
           subOperation: 'NO_CALL_RECORD_FOUND',
           messageId,
           ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
           data: {
             message: 'No existing call record found, creating new case and call record',
@@ -96,9 +100,11 @@ const answer = async (req) => {
             subOperation: 'FALLBACK_CASE_CREATED',
             messageId,
             ani: body.ani,
+            callId: body.call_id,
             userId: body.alulaUser.id,
             caseId: caseRecord.id,
             data: {
+              message: 'Fallback case created for unanswered call',
               caseRecord,
             },
           })
@@ -107,7 +113,9 @@ const answer = async (req) => {
 
       const callRecordCreated = await atp.calls.create({
         callerNumber: body.ani,
+        callId: body.call_id,
         callerName: tech ? `${tech.First_Name__c} ${tech.Last_Name__c}` : null,
+        companyName: tech?.Account?.Name || null,
         userId: body.alulaUser.id,
         caseCreated: caseCreated,
         salesforceCaseId: caseCreated ? caseRecord.id : null,
@@ -122,9 +130,11 @@ const answer = async (req) => {
           subOperation: 'FALLBACK_CALL_CREATED',
           messageId,
           ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
           callRecordId: callRecordCreated.id,
           data: {
+            message: 'Fallback call record created with ACTIVE status',
             callRecordCreated,
           },
         })
@@ -138,6 +148,7 @@ const answer = async (req) => {
         operation: 'answer',
         messageId,
         ani: body.ani,
+        callId: body.call_id,
         userId: body.alulaUser?.id,
       }),
       ...formatError(error),
@@ -146,56 +157,59 @@ const answer = async (req) => {
 };
 
 const end = async (req) => {
-  const { messageId, body, logger, callRecord } = req;
+  let { messageId, body, logger, callRecord } = req;
 
   logger.info(
     createCallLog({
       operation: 'end',
       messageId,
       ani: body.ani,
+      callId: body.call_id,
       userId: body.alulaUser?.id,
       data: {
+        message: 'Call end event received',
         body,
       },
     })
   );
 
   try {
-    if (!body.alulaUser.callsActive) return; // Early return if user is not activated for call tracking
-    if (body.recording_url.length === 0) return; // Early return for no call recording (RNA)
+    if (!body.alulaUser?.callsActive) return; // Early return if user is not activated for call tracking
 
-    const endTime = new Date();
-    let activeCallRecord = callRecord;
+    // RNA: no recording and call record was in RINGING state — caller hung up while ringing
+    if (body.recording_url.length === 0 && callRecord?.status === 'RINGING') {
+      await atp.calls.update(callRecord.id, {
+        status: 'ABANDONED',
+        endTime: new Date(),
+      });
 
-    // If no call record from middleware or it's not ACTIVE, try to find one
-    if (!activeCallRecord || activeCallRecord.status !== 'ACTIVE') {
-      activeCallRecord = await atp.calls
-        .fetchOne({
-          callerNumber: body.ani,
+      logger.info(
+        createCallLog({
+          operation: 'end',
+          subOperation: 'RNA_ABANDONED',
+          messageId,
+          ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
-          status: 'ACTIVE',
+          callRecordId: callRecord.id,
+          data: { message: 'Call abandoned while ringing (RNA)' },
         })
-        .catch((error) => {
-          logger.error({
-            ...createCallLog({
-              operation: 'end',
-              subOperation: 'FIND_CALL',
-              messageId,
-              ani: body.ani,
-              userId: body.alulaUser.id,
-            }),
-            ...formatError(error),
-          });
-        });
+      );
+      return;
     }
 
-    if (!activeCallRecord) {
+    if (body.recording_url.length === 0) return; // Early return for no call recording (non-RINGING)
+
+    const endTime = new Date();
+
+    if (!callRecord) {
       logger.warn(
         createCallLog({
           operation: 'end',
           subOperation: 'NO_ACTIVE_CALL',
           messageId,
           ani: body.ani,
+          callId: body.call_id,
           userId: body.alulaUser.id,
           data: {
             message: 'No active call record found, calling answer to create one',
@@ -204,12 +218,12 @@ const end = async (req) => {
         })
       );
       req.retry = true;
-      activeCallRecord = await answer(req);
+      callRecord = await answer(req);
     }
 
-    const callDuration = (endTime - new Date(activeCallRecord.startTime)) / 1000;
+    const callDuration = (endTime - new Date(callRecord.startTime)) / 1000;
 
-    const callRecordUpdated = await atp.calls.update(activeCallRecord.id, {
+    const callRecordUpdated = await atp.calls.update(callRecord.id, {
       callLink: body.recording_url,
       endTime: endTime,
       duration: callDuration,
@@ -222,9 +236,11 @@ const end = async (req) => {
         subOperation: 'CALL_RECORD_UPDATED',
         messageId,
         ani: body.ani,
+        callId: body.call_id,
         userId: body.alulaUser.id,
-        callRecordId: activeCallRecord.id,
+        callRecordId: callRecord.id,
         data: {
+          message: 'Call record updated to COMPLETE',
           callRecordUpdated,
         },
       })
@@ -235,7 +251,87 @@ const end = async (req) => {
         operation: 'end',
         messageId,
         ani: body.ani,
+        callId: body.call_id,
         userId: body.alulaUser?.id,
+      }),
+      ...formatError(error),
+    });
+  }
+};
+
+const ringing = async (req) => {
+  const { messageId, body, logger, callRecord } = req;
+  const user = body.alulaUser;
+
+  try {
+    logger.info(
+      createCallLog({
+        operation: 'ringing',
+        messageId,
+        ani: body.ani,
+        callId: body.call_id,
+        userId: user?.id,
+        data: { body },
+      })
+    );
+
+    // Update call record to RINGING with assigned agent
+    if (callRecord) {
+      await atp.calls.update(callRecord.id, {
+        status: 'RINGING',
+        userId: user.id,
+      });
+
+      logger.info(
+        createCallLog({
+          operation: 'ringing',
+          subOperation: 'CALL_RECORD_UPDATED',
+          messageId,
+          ani: body.ani,
+          callId: body.call_id,
+          userId: user.id,
+          callRecordId: callRecord.id,
+          data: { status: 'RINGING' },
+        })
+      );
+    } else {
+      logger.warn(
+        createCallLog({
+          operation: 'ringing',
+          subOperation: 'NO_CALL_RECORD',
+          messageId,
+          ani: body.ani,
+          callId: body.call_id,
+          userId: user?.id,
+          data: { message: 'No call record found to update' },
+        })
+      );
+    }
+
+    // Update Slack status
+    if (user && !user.supervisor) {
+      ava.status.update({
+        slackId: user.slackId,
+        statusText: `Ringing @ ${moment(Date.now()).format('hh:mm a')}`,
+        statusEmoji: ':bell:',
+      });
+    }
+
+    // Update dashboard status
+    if (user) {
+      atp.users.update(user.id, {
+        currentStatus: 'RINGING',
+        statusSince: new Date(),
+      });
+    }
+  } catch (error) {
+    logger.error({
+      ...createCallLog({
+        operation: 'ringing',
+        messageId,
+        ani: body.ani,
+        callId: body.call_id,
+        userId: user?.id,
       }),
       ...formatError(error),
     });
@@ -245,4 +341,5 @@ const end = async (req) => {
 module.exports = {
   answer,
   end,
+  ringing,
 };

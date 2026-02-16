@@ -6,4 +6,6 @@ router.post('/answer', withQueue(callsController.answer));
 
 router.post('/end', withQueue(callsController.end));
 
+router.post('/ringing', withQueue(callsController.ringing));
+
 module.exports = router;

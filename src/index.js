@@ -21,6 +21,13 @@ app.use(express.text({ type: 'text/json' }));
 // XML (parse into JS object)
 app.use(xmlparser({ explicitArray: false, type: ['application/xml', 'text/xml'] }));
 
+// -- Dashboard (before mutex - read-only, bypasses webhook processing) --
+const path = require('path');
+const dashboardRouter = require('./routes/dashboard');
+const dashboardPath = `/dashboard/${process.env.DASHBOARD_KEY}`;
+app.use(dashboardPath, express.static(path.join(__dirname, '../public')));
+app.use(dashboardPath, dashboardRouter);
+
 // -- Message ID Middleware --
 app.use((req, res, next) => {
   req.messageId = uuidv4();
@@ -56,47 +63,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// -- Find Call Record Middleware (finds existing call records for all routes except /queue/new) --
+// -- Find Call Record Middleware --
 app.use(async (req, res, next) => {
-  // Skip for /queue/new since that's where we create the record
-  if (req.originalUrl.startsWith('/queue/new')) {
-    req.callRecord = null;
-    return next();
-  }
+  const callId = req.body.call_id;
 
-  const callerNumber = req.body.caller_number || req.body.ani;
-
-  if (!callerNumber) {
+  if (!callId) {
     req.callRecord = null;
     return next();
   }
 
   try {
-    // Try to find a call record with QUEUED status first
-    let callRecord = await atp.calls.fetchOne({
-      callerNumber: callerNumber,
-      status: 'QUEUED',
-    });
-
-    // If not found, try CALLBACK_REQUESTED
-    if (!callRecord) {
-      callRecord = await atp.calls.fetchOne({
-        callerNumber: callerNumber,
-        status: 'CALLBACK_REQUESTED',
-      });
-    }
-
-    // If still not found, try ACTIVE
-    if (!callRecord) {
-      callRecord = await atp.calls.fetchOne({
-        callerNumber: callerNumber,
-        status: 'ACTIVE',
-      });
-    }
-
+    const callRecord = await atp.calls.fetchOne({ callId });
     req.callRecord = callRecord;
   } catch (error) {
-    logger.error({ error, callerNumber, messageId: req.messageId }, 'Error finding call record in middleware');
+    logger.error({ error, callId, messageId: req.messageId }, 'Error finding call record in middleware');
     req.callRecord = null;
   }
 
@@ -106,19 +86,11 @@ app.use(async (req, res, next) => {
 // --- Middleware function ---
 const alulaUserMiddleware = async (req, res, next) => {
   try {
-    const supervisors = ['861', '1230'];
-
     if (req.body.event_type && !req.body.event_aux_type) {
       req.body.event_aux_type = req.body.event_type;
     }
 
     const agentId = req.body.agent_id;
-
-    if (supervisors.includes(agentId)) {
-      req.body.isSupervisor = true;
-      req.body.alulaUser = null;
-      return next();
-    }
 
     req.body.alulaUser = await atp.users.fetchOne({ rcId: agentId });
 

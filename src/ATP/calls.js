@@ -51,6 +51,24 @@ async function fetchOne(options) {
   }
 }
 
+/**
+ * Fetches all call records from the ATP API.
+ * Optionally accepts a filter object to narrow results.
+ * @param {object} [filter] - A filter object to match specific criteria (e.g. { status: 'QUEUED' }).
+ * @returns {Promise<Array>} A promise that resolves to an array of call records.
+ * @throws {Error} If a network error occurs.
+ */
+async function fetchAll(filter) {
+  try {
+    const response = await axios.get(`${atp_url}/calls`, {
+      params: filter ? { filter } : {},
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error('Error fetching call records from ATP: ' + error.message);
+  }
+}
+
 async function update(id, data) {
   try {
     const response = await axios.patch(`${atp_url}/calls/${id}`, data);
@@ -64,5 +82,6 @@ async function update(id, data) {
 module.exports = {
   create,
   fetchOne,
+  fetchAll,
   update,
 };
