@@ -1,0 +1,82 @@
+body { background: #e8eaed; }
+h1 { color: #1779ba; }
+.count { background: #1779ba; padding: 2px 10px; border-radius: 12px; font-size: 0.85rem; color: #fff; }
+.empty { text-align: center; padding: 40px; color: #6b7280; }
+.duration { font-variant-numeric: tabular-nums; }
+
+/* Status badges */
+.status { padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; display: inline-block; }
+.status-available { background: #dcfce7; color: #166534; }
+.status-engaged, .status-outbound { background: #dbeafe; color: #1d4ed8; }
+.status-on-call-long { background: #fee2e2; color: #dc2626; }
+.status-lunch, .status-on-break, .status-bathroom-break { background: #fef3c7; color: #92400e; }
+.status-training, .status-meeting, .status-follow-up, .status-email-support { background: #dbeafe; color: #1e40af; }
+.status-ringing { background: #fef9c3; color: #854d0e; }
+.status-rna-state { background: #fce7f3; color: #9d174d; }
+.status-wrap-up { background: #f3e8ff; color: #6b21a8; }
+.status-login { background: #f3f4f6; color: #6b7280; }
+.supervisor-tag { font-size: 0.7rem; background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }
+.callback-tag { font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; }
+.tz-toggle { font-size: 0.65rem; background: #e5e7eb; color: #374151; padding: 1px 5px; border-radius: 3px; margin-left: 4px; cursor: pointer; user-select: none; }
+.queue-remove-btn { background: none; border: none; color: #9ca3af; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.queue-remove-btn:hover { background: #fee2e2; color: #dc2626; }
+.queue-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Stats cards */
+.stat-card { text-align: center; }
+.stat-card .stat-value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-card .stat-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-top: 2px; }
+.stat-card.stat-answered .stat-value { color: #166534; }
+.stat-card.stat-abandoned .stat-value { color: #991b1b; }
+.stat-card.stat-outbound .stat-value { color: #0369a1; }
+.stat-card.stat-callback .stat-value { color: #92400e; }
+.stat-card.stat-cb-failed .stat-value { color: #9333ea; }
+
+/* Live cards */
+.live-card { display: flex; align-items: center; justify-content: space-between; }
+.live-label { font-size: 0.85rem; color: #6b7280; text-transform: uppercase; }
+.live-value { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.live-detail { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
+
+/* Call list dropdown */
+.call-list-select { font-size: 1.1rem; font-weight: 600; background: transparent; border: none; cursor: pointer; font-family: inherit; }
+
+/* Toggle button */
+.theme-toggle { background: #d0d3d8; border: none; border-radius: 20px; width: 48px; height: 26px; cursor: pointer; display: flex; align-items: center; padding: 3px; transition: background 0.3s; flex-shrink: 0; }
+.theme-toggle .knob { width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.3s; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+
+/* Dark mode */
+body.dark { background: #071323; color: #f0f2f3; --bs-body-color: #f0f2f3; --bs-body-bg: #071323; }
+body.dark .card { background: #132133; border-color: #1779ba22; color: #f0f2f3; }
+body.dark .card-header { background: #0e1a2b; border-color: #1779ba22; color: #fff; }
+body.dark .card-body { color: #f0f2f3; }
+body.dark .table { color: #f0f2f3; --bs-table-bg: transparent; --bs-table-color: #f0f2f3; --bs-table-striped-color: #f0f2f3; --bs-table-striped-bg: #0e1a2b; --bs-table-hover-color: #f0f2f3; --bs-table-hover-bg: #162740; border-color: #1a2d42; }
+body.dark .table thead th { color: #787676; border-color: #1a2d42; }
+body.dark .table td { border-color: #1a2d42; color: #f0f2f3; }
+body.dark select, body.dark option { background: #132133; color: #f0f2f3; }
+body.dark .empty { color: #787676; }
+body.dark .status-available { background: #0a3d2a; color: #3adb76; }
+body.dark .status-engaged, body.dark .status-outbound { background: #1e3a5f; color: #60a5fa; }
+body.dark .status-on-call-long { background: #4a1010; color: #f87171; }
+body.dark .status-lunch, body.dark .status-on-break, body.dark .status-bathroom-break { background: #3d2e08; color: #ffae00; }
+body.dark .status-training, body.dark .status-meeting, body.dark .status-follow-up, body.dark .status-email-support { background: #0c3483; color: #a2b6df; }
+body.dark .status-ringing { background: #3d3408; color: #facc15; }
+body.dark .status-rna-state { background: #2d1050; color: #cc4b37; }
+body.dark .status-wrap-up { background: #2d1050; color: #c084fc; }
+body.dark .status-login { background: #132133; color: #787676; }
+body.dark .supervisor-tag { background: #1779ba33; color: #037fff; }
+body.dark .callback-tag { background: #3d2e08; color: #ffae00; }
+body.dark .tz-toggle { background: #1a2d42; color: #787676; }
+body.dark .queue-remove-btn { color: #787676; }
+body.dark .queue-remove-btn:hover { background: #4a1010; color: #f87171; }
+body.dark .live-value { color: #f0f2f3; }
+body.dark .live-label, body.dark .live-detail { color: #787676; }
+body.dark .stat-card .stat-value { color: #f0f2f3; }
+body.dark .stat-card .stat-label { color: #787676; }
+body.dark .stat-card.stat-answered .stat-value { color: #3adb76; }
+body.dark .stat-card.stat-abandoned .stat-value { color: #f16036; }
+body.dark .stat-card.stat-outbound .stat-value { color: #037fff; }
+body.dark .stat-card.stat-callback .stat-value { color: #ffae00; }
+body.dark .call-list-select { color: #fff; }
+body.dark .theme-toggle { background: #1779ba; }
+body.dark .theme-toggle .knob { transform: translateX(22px); }

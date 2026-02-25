@@ -3,6 +3,7 @@ const atp = require('../ATP');
 const { createStatusLog, formatError } = require('../helpers/log_schema');
 const moment = require('moment');
 const { isInWrapUp, clearWrapUp, startWrapUp } = require('../helpers/wrapup_timers');
+const { checkCallbackQueue } = require('../helpers/callback_timers');
 
 const handleRequest = async (req, res) => {
   const { messageId, logger } = req;
@@ -12,7 +13,7 @@ const handleRequest = async (req, res) => {
   try {
     // Skip Slack updates for supervisors, but persist status for dashboard
     if (user.supervisor) {
-      atp.users.update(user.id, {
+      await atp.users.update(user.id, {
         currentStatus: body.event_aux_type,
         statusSince: new Date(),
       });
@@ -99,24 +100,39 @@ const handleRequest = async (req, res) => {
       },
     };
 
-    if (body.event_aux_type === 'TRANSITION' || (body.event_aux_type === 'ENGAGED' && body.prev_aux_state === 'OUTBOUND')) {
+    if (body.event_aux_type === 'TRANSITION') {
+      return;
+    }
+
+    // While in OUTBOUND, ignore all status changes except AVAILABLE
+    if (user.currentStatus === 'OUTBOUND' && body.event_aux_type !== 'AVAILABLE') {
       return;
     }
 
     // ENGAGED -> AVAILABLE means a call just ended — start 2 minute wrap-up
+    // Skip wrap-up for outbound calls (no wrap-up needed)
     if (body.event_aux_type === 'AVAILABLE' && body.prev_state === 'ENGAGED') {
-      startWrapUp(user, logger);
-      logger.info(
-        createStatusLog({
-          operation: 'update',
-          messageId,
-          userId: user.id,
-          status: 'WRAP-UP',
-          previousStatus: 'ENGAGED',
-          data: { message: 'Call ended — agent placed in WRAP-UP status' },
-        })
-      );
-      return;
+      if (user.currentStatus === 'OUTBOUND') {
+        // Outbound call ended — fall through to set AVAILABLE normally, no wrap-up
+      } else {
+        await startWrapUp(user, logger);
+        logger.info(
+          createStatusLog({
+            operation: 'update',
+            messageId,
+            userId: user.id,
+            slackId: user.slackId,
+            status: 'WRAP-UP',
+            previousStatus: 'ENGAGED',
+            data: {
+              statusText: `Wrap Up @ ${moment(Date.now()).format('hh:mm a')}`,
+              statusEmoji: ':hourglass_flowing_sand:',
+              userName: user.nameFirst,
+            },
+          })
+        );
+        return;
+      }
     }
 
     // If agent is in wrap-up and changes to a non-AVAILABLE status, clear the timer
@@ -127,22 +143,38 @@ const handleRequest = async (req, res) => {
           operation: 'update',
           messageId,
           userId: user.id,
+          slackId: user.slackId,
           status: body.event_aux_type,
-          data: { message: 'WRAP-UP timer cleared — agent changed status manually' },
+          previousStatus: 'WRAP-UP',
+          data: {
+            statusText: statusMap[body.event_aux_type]?.statusText,
+            statusEmoji: statusMap[body.event_aux_type]?.statusEmoji,
+            userName: user.nameFirst,
+          },
         })
       );
     }
 
     if (statusMap[body.event_aux_type]) {
-      ava.status.update({
+      await ava.status.update({
         slackId: user.slackId,
         ...statusMap[body.event_aux_type],
       });
 
-      atp.users.update(user.id, {
+      const updateData = {
         currentStatus: body.event_aux_type,
         statusSince: new Date(),
-      });
+      };
+
+      // Record first login/logout of the day
+      if (body.event_aux_type === 'LOGIN' && (!user.lastLogin || !moment(user.lastLogin).isSame(moment(), 'day'))) {
+        updateData.lastLogin = new Date();
+      }
+      if (body.event_aux_type === 'LOGOUT' && (!user.lastLogout || !moment(user.lastLogout).isSame(moment(), 'day'))) {
+        updateData.lastLogout = new Date();
+      }
+
+      await atp.users.update(user.id, updateData);
 
       logger.info(
         createStatusLog({
@@ -159,6 +191,11 @@ const handleRequest = async (req, res) => {
           },
         })
       );
+
+      // When an agent becomes AVAILABLE, check if the next queued call is a callback
+      if (body.event_aux_type === 'AVAILABLE') {
+        await checkCallbackQueue(logger);
+      }
     } else {
       throw new Error('Unknown status set');
     }

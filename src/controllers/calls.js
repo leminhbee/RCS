@@ -4,6 +4,7 @@ const { createCallLog, formatError } = require('../helpers/log_schema');
 const atp = require('../ATP');
 const ava = require('../AVA');
 const moment = require('moment');
+const { clearCallbackTimer } = require('../helpers/callback_timers');
 
 
 const answer = async (req) => {
@@ -46,6 +47,7 @@ const answer = async (req) => {
         : null;
 
       const updatedCallRecord = await atp.calls.update(callRecord.id, {
+        callId: body.call_id,
         userId: body.alulaUser.id,
         status: 'ACTIVE',
         callLink: body.call_recording,
@@ -116,7 +118,7 @@ const answer = async (req) => {
       const callRecordCreated = await atp.calls.create({
         callerNumber: body.ani,
         callId: body.call_id,
-        callerName: tech ? `${tech.First_Name__c} ${tech.Last_Name__c}` : null,
+        callerName: tech ? [tech.First_Name__c, tech.Last_Name__c].filter(Boolean).join(' ') :null,
         companyName: tech?.Account?.Name || null,
         userId: body.alulaUser.id,
         caseCreated: caseCreated,
@@ -178,6 +180,131 @@ const end = async (req) => {
 
   try {
     if (!body.alulaUser?.callsActive) return; // Early return if user is not activated for call tracking
+    if (body.alulaUser?.supervisor && body.event_type === 'ONE-TO-ONE-OUTBOUND') return; // Skip outbound tracking for supervisors
+
+    // ONE-TO-ONE-OUTBOUND: outbound call ended (no prior /calls/answer)
+    if (body.event_type === 'ONE-TO-ONE-OUTBOUND') {
+      const callerNumber = body.dnis;
+      const startTime = body.call_start ? new Date(body.call_start.replace(' ', 'T') + '-05:00') : new Date();
+      const endTime = new Date();
+      const callDuration = (endTime - startTime) / 1000;
+
+      // Search for most recent call by dnis + user for today
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      await sfdcConn.authorize({ grant_type: 'client_credentials' });
+      const tech = await sfdcFunctions.findTech(callerNumber, { messageId, ani: callerNumber }, logger);
+
+      const recentCalls = await atp.calls.fetchAll({
+        callerNumber,
+        userId: body.alulaUser.id,
+      });
+
+      const previousCall = recentCalls
+        ?.filter(c => new Date(c.startTime) >= todayStart)
+        ?.sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+        ?.[0] || null;
+
+      if (previousCall) {
+        // Found a previous call — copy case info, create new record with its own recording
+        const newCallRecord = await atp.calls.create({
+          callerNumber,
+          callId: body.call_id,
+          callerName: tech ? [tech.First_Name__c, tech.Last_Name__c].filter(Boolean).join(' ') :previousCall.callerName,
+          companyName: tech?.Account?.Name || previousCall.companyName,
+          salesforceCaseId: previousCall.salesforceCaseId,
+          userId: body.alulaUser.id,
+          caseCreated: !!previousCall.salesforceCaseId,
+          startTime,
+          endTime,
+          duration: callDuration,
+          status: 'COMPLETE',
+          callLink: body.recording_url,
+          outbound: true,
+        });
+
+        logger.info(
+          createCallLog({
+            operation: 'end',
+            subOperation: 'OUTBOUND_PREVIOUS_CALL_FOUND',
+            messageId,
+            ani: body.ani,
+            callId: body.call_id,
+            userId: body.alulaUser.id,
+            callRecordId: newCallRecord.id,
+            data: {
+              message: 'Outbound call linked to previous call case',
+              previousCallId: previousCall.id,
+              salesforceCaseId: previousCall.salesforceCaseId,
+            },
+          })
+        );
+
+        // Append new recording URL to Salesforce case, or notify AVA if no case exists
+        if (previousCall.salesforceCaseId) {
+          const existingCase = await sfdcConn.sobject('Case').retrieve(previousCall.salesforceCaseId);
+          const existingUrl = existingCase.Jive_URL__c || '';
+          const updatedUrl = existingUrl ? `${existingUrl}\n${body.recording_url}` : body.recording_url;
+
+          await sfdcConn.sobject('Case').update({
+            Id: previousCall.salesforceCaseId,
+            Jive_URL__c: updatedUrl,
+          });
+
+          logger.info(
+            createCallLog({
+              operation: 'end',
+              subOperation: 'OUTBOUND_CASE_URL_APPENDED',
+              messageId,
+              ani: body.ani,
+              callId: body.call_id,
+              userId: body.alulaUser.id,
+              caseId: previousCall.salesforceCaseId,
+              data: {
+                message: 'Appended outbound recording URL to Salesforce case',
+              },
+            })
+          );
+        } else {
+          await ava.outbound.notify(callerNumber, newCallRecord.id, body.alulaUser.slackId, body.recording_url);
+        }
+      } else {
+        // No previous call found — create record and notify AVA
+        const newCallRecord = await atp.calls.create({
+          callerNumber,
+          callId: body.call_id,
+          callerName: tech ? [tech.First_Name__c, tech.Last_Name__c].filter(Boolean).join(' ') :null,
+          companyName: tech?.Account?.Name || null,
+          userId: body.alulaUser.id,
+          startTime,
+          endTime,
+          duration: callDuration,
+          status: 'COMPLETE',
+          callLink: body.recording_url,
+          outbound: true,
+        });
+
+        logger.info(
+          createCallLog({
+            operation: 'end',
+            subOperation: 'OUTBOUND_NO_PREVIOUS_CALL',
+            messageId,
+            ani: body.ani,
+            callId: body.call_id,
+            userId: body.alulaUser.id,
+            callRecordId: newCallRecord.id,
+            data: {
+              message: 'Outbound call with no previous call found, notifying AVA',
+            },
+          })
+        );
+
+        await ava.outbound.notify(callerNumber, newCallRecord.id, body.alulaUser.slackId, body.recording_url);
+      }
+
+      return;
+    }
 
     // RNA: no recording and call record was in RINGING state — caller hung up while ringing
     if (body.recording_url.length === 0 && callRecord?.status === 'RINGING') {
@@ -200,8 +327,6 @@ const end = async (req) => {
       );
       return;
     }
-
-    if (body.recording_url.length === 0) return; // Early return for no call recording (non-RINGING)
 
     const endTime = new Date();
 
@@ -281,6 +406,11 @@ const ringing = async (req) => {
 
     // Update call record to RINGING with assigned agent
     if (callRecord) {
+      // If this was a callback, clear the expiration timer — the callback is working
+      if (callRecord.status === 'CALLBACK_REQUESTED') {
+        clearCallbackTimer(callRecord.id);
+      }
+
       await atp.calls.update(callRecord.id, {
         status: 'RINGING',
         userId: user.id,

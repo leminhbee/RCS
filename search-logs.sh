@@ -1,30 +1,49 @@
 #!/bin/bash
 
 # Search logs for one or more strings and save results to a new file
-# Usage: ./search-logs.sh [-a|--and] "search term" ["term2" "term3" ...]
+# Usage: ./search-logs.sh [-a|--and] [-l|--log <logfile>] "search term" ["term2" "term3" ...]
 
 LOG_DIR="/home/ubuntu/RCS/LOGS"
-LOG_FILE="$LOG_DIR/LOGS.json"
+LOG_NAME="LOGS.json"
 RESULTS_DIR="$LOG_DIR/search_results"
 
 # Parse flags
 LOGIC_MODE="OR"  # Default to OR logic
-if [[ "$1" == "-a" ]] || [[ "$1" == "--and" ]]; then
-    LOGIC_MODE="AND"
-    shift  # Remove the flag from arguments
-fi
+while [[ "$1" == -* ]]; do
+    case "$1" in
+        -a|--and)
+            LOGIC_MODE="AND"
+            shift
+            ;;
+        -l|--log)
+            LOG_NAME="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown flag: $1"
+            exit 1
+            ;;
+    esac
+done
+
+LOG_FILE="$LOG_DIR/$LOG_NAME"
 
 # Check if search term was provided
 if [ -z "$1" ]; then
-    echo "Usage: ./search-logs.sh [-a|--and] \"search term\" [\"term2\" \"term3\" ...]"
+    echo "Usage: ./search-logs.sh [-a|--and] [-l|--log <logfile>] \"search term\" [\"term2\" \"term3\" ...]"
     echo ""
     echo "Flags:"
-    echo "  -a, --and    Use AND logic (matches ALL terms) instead of OR (matches ANY term)"
+    echo "  -a, --and          Use AND logic (matches ALL terms) instead of OR (matches ANY term)"
+    echo "  -l, --log <file>   Log file name to search (default: LOGS.json)"
     echo ""
     echo "Examples:"
     echo "  Single search:"
     echo "    ./search-logs.sh \"error\""
     echo "    ./search-logs.sh \"1234567890\""
+    echo ""
+    echo "  Search a specific log file:"
+    echo "    ./search-logs.sh -l app.json \"error\""
+    echo "    ./search-logs.sh --log errors.json \"timeout\""
     echo ""
     echo "  Multiple searches with OR logic (default - matches ANY term):"
     echo "    ./search-logs.sh \"error\" \"warn\""

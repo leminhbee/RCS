@@ -21,8 +21,13 @@ const findTech = async (number, commonLog, logger) => {
 
     if (result.totalSize < 1) return null;
 
-    logger.info({ ...commonLog, subEvent: 'FIND TECH', tech: result.records[0] }, 'Tech found');
-    return result.records[0];
+    const tech = result.records[0];
+    const toTitleCase = (str) => str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : str;
+    tech.First_Name__c = toTitleCase(tech.First_Name__c);
+    tech.Last_Name__c = toTitleCase(tech.Last_Name__c);
+
+    logger.info({ ...commonLog, subEvent: 'FIND TECH', tech }, 'Tech found');
+    return tech;
   } catch (error) {
     logger.error({ ...commonLog, subEvent: 'FIND TECH', error }, 'Unable to find tech');
     return null;

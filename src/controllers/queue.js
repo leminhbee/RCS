@@ -59,7 +59,7 @@ const add = async (req) => {
     const callRecordCreated = await atp.calls.create({
       callerNumber: callerNumber,
       callId: body.call_id,
-      callerName: tech ? `${tech.First_Name__c} ${tech.Last_Name__c}` : null,
+      callerName: tech ? [tech.First_Name__c, tech.Last_Name__c].filter(Boolean).join(' ') : null,
       companyName: tech?.Account?.Name || null,
       userId: null,
       caseCreated: true,
@@ -220,6 +220,7 @@ const callback = async (req) => {
     if (callRecord) {
       await atp.calls.update(callRecord.id, {
         status: 'CALLBACK_REQUESTED',
+        callBackRequested: true,
       });
 
       logger.info(

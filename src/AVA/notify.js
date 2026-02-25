@@ -39,7 +39,21 @@ const newChat = async (slackId, userName, timeOver) => {
   }
 };
 
+const callbackFailed = async (callerNumber, callerName, companyName) => {
+  try {
+    const { data } = await axios.post(`${AVA_URL}/notifications/callbackFailed`, {
+      callerNumber,
+      callerName,
+      companyName,
+    });
+    return data;
+  } catch (error) {
+    throw new Error('Error notifying of failed callback: ' + error.message);
+  }
+};
+
 module.exports = {
   breakEnding,
   late,
+  callbackFailed,
 };

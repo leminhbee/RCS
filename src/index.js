@@ -9,6 +9,7 @@ const { Mutex } = require('async-mutex');
 const xmlparser = require('express-xml-bodyparser');
 const http = require('http');
 const { recoverWrapUps } = require('./helpers/wrapup_timers');
+const { recoverCallbackTimers } = require('./helpers/callback_timers');
 const websocket = require('./helpers/websocket');
 
 // --- Configuration ---
@@ -58,11 +59,13 @@ app.use((req, res, next) => {
           'content-type': req.headers['content-type'],
           'user-agent': req.headers['user-agent'],
           'x-forwarded-for': req.headers['x-forwarded-for'],
+          'dashboard_key': req.headers['dashboard_key'],
         },
         body: req.body,
       },
     })
   );
+
   next();
 });
 
@@ -77,7 +80,21 @@ app.use(async (req, res, next) => {
 
   try {
     const callRecord = await atp.calls.fetchOne({ callId });
-    req.callRecord = callRecord;
+
+    if (callRecord) {
+      req.callRecord = callRecord;
+    } else {
+      // No record found by call_id — check for a callback in progress with this caller number
+      // Check both CALLBACK_REQUESTED and RINGING, since the ringing handler may have already updated the status
+      const callerNumber = req.body.ani;
+      if (callerNumber) {
+        const callbackRecord = await atp.calls.fetchOne({ callerNumber, status: 'CALLBACK_REQUESTED' })
+          || await atp.calls.fetchOne({ callerNumber, status: 'RINGING' });
+        req.callRecord = callbackRecord || null;
+      } else {
+        req.callRecord = null;
+      }
+    }
   } catch (error) {
     logger.error({ error, callId, messageId: req.messageId }, 'Error finding call record in middleware');
     req.callRecord = null;
@@ -95,7 +112,14 @@ const alulaUserMiddleware = async (req, res, next) => {
 
     const agentId = req.body.agent_id;
 
-    req.body.alulaUser = await atp.users.fetchOne({ rcId: agentId });
+    // Try to find user by agent_id first, fall back to call record's userId
+    if (agentId) {
+      req.body.alulaUser = await atp.users.fetchOne({ rcId: agentId });
+    }
+
+    if (!req.body.alulaUser && req.callRecord?.userId) {
+      req.body.alulaUser = await atp.users.fetchOne(req.callRecord.userId);
+    }
 
     if (req.body.alulaUser) {
       next();
@@ -183,6 +207,16 @@ server.listen(PORT, async () => {
   } catch (error) {
     logger.error({
       ...createAppLog({ operation: 'wrapup_recovery' }),
+      ...formatError(error),
+    });
+  }
+
+  // Recover any callback timers (if an agent is available and a callback is next in queue)
+  try {
+    await recoverCallbackTimers(logger);
+  } catch (error) {
+    logger.error({
+      ...createAppLog({ operation: 'callback_recovery' }),
       ...formatError(error),
     });
   }

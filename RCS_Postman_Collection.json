@@ -1,0 +1,873 @@
+{
+	"info": {
+		"_postman_id": "rcs-api-collection",
+		"name": "RCS API",
+		"description": "Postman collection for testing the RCS (RingCentral Call Service) API endpoints.\n\nBase URL: http://localhost:3005\n\nAll webhook endpoints return 200 immediately and process asynchronously.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3005",
+			"type": "string"
+		},
+		{
+			"key": "dashboard_key",
+			"value": "YOUR_DASHBOARD_KEY",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Calls",
+			"description": "Call lifecycle endpoints — ringing, answer, and end.",
+			"item": [
+				{
+					"name": "Call Ringing",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"RINGING\",\n\t\"event_aux_type\": \"RINGING\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/calls/ringing",
+							"host": ["{{base_url}}"],
+							"path": ["calls", "ringing"]
+						},
+						"description": "Fires when a call starts ringing at an agent's phone. Updates the call record to RINGING status and sets the agent's Slack status to a bell emoji."
+					}
+				},
+				{
+					"name": "Call Answer",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"call_recording\": \"https://media.ringcentral.com/recording/abc123\",\n\t\"enqueue_time\": \"2026-02-18T16:00:00Z\",\n\t\"dequeue_time\": \"2026-02-18T16:01:30Z\",\n\t\"event_type\": \"ANSWER\",\n\t\"event_aux_type\": \"ANSWER\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/calls/answer",
+							"host": ["{{base_url}}"],
+							"path": ["calls", "answer"]
+						},
+						"description": "Fires when an agent picks up a call. Updates the Salesforce case owner, adds the recording URL, and transitions the call record to ACTIVE status. Calculates queue duration from enqueue/dequeue times."
+					}
+				},
+				{
+					"name": "Call End",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ONE-TO-ONE\",\n\t\"recording_url\": \"https://media.ringcentral.com/recording/abc123\",\n\t\"dnis\": \"\",\n\t\"call_start\": \"2026-02-18T16:01:30Z\",\n\t\"prev_state\": \"ACTIVE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/calls/end",
+							"host": ["{{base_url}}"],
+							"path": ["calls", "end"]
+						},
+						"description": "Fires when a call ends. Marks the call record as COMPLETE with end time and duration. If there is no recording and the call was RINGING, it is marked as ABANDONED (RNA)."
+					}
+				},
+				{
+					"name": "Call End — Outbound",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-outbound-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ONE-TO-ONE-OUTBOUND\",\n\t\"recording_url\": \"https://media.ringcentral.com/recording/outbound-abc123\",\n\t\"dnis\": \"+15559876543\",\n\t\"call_start\": \"2026-02-18T16:05:00Z\",\n\t\"prev_state\": \"OUTBOUND\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/calls/end",
+							"host": ["{{base_url}}"],
+							"path": ["calls", "end"]
+						},
+						"description": "Fires when an outbound call ends. Creates a new outbound call record linked to the previous call's case and appends the recording URL to the Salesforce case."
+					}
+				},
+				{
+					"name": "Call End — Abandoned (RNA)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-rna-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ONE-TO-ONE\",\n\t\"recording_url\": \"\",\n\t\"dnis\": \"\",\n\t\"call_start\": \"2026-02-18T16:01:30Z\",\n\t\"prev_state\": \"RINGING\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/calls/end",
+							"host": ["{{base_url}}"],
+							"path": ["calls", "end"]
+						},
+						"description": "Simulates a Ring-No-Answer scenario: no recording and prev_state is RINGING, so the call is marked ABANDONED."
+					}
+				}
+			]
+		},
+		{
+			"name": "Queue",
+			"description": "Queue lifecycle endpoints — new call entering queue, callback request, and queue exit.",
+			"item": [
+				{
+					"name": "Queue New",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/queue/new",
+							"host": ["{{base_url}}"],
+							"path": ["queue", "new"]
+						},
+						"description": "Fires when a new call enters the queue. Looks up the caller in Salesforce, creates an unassigned case, and creates an ATP call record with status QUEUED."
+					}
+				},
+				{
+					"name": "Queue Callback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/queue/callback",
+							"host": ["{{base_url}}"],
+							"path": ["queue", "callback"]
+						},
+						"description": "Fires when a customer requests a callback. Updates the call record to CALLBACK_REQUESTED status. The call stays in the queue."
+					}
+				},
+				{
+					"name": "Queue End — Connected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\",\n\t\"call_result\": \"CONNECTED\",\n\t\"recording_url\": \"https://media.ringcentral.com/recording/abc123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/queue/end",
+							"host": ["{{base_url}}"],
+							"path": ["queue", "end"]
+						},
+						"description": "Fires when a call exits the queue after being connected to an agent."
+					}
+				},
+				{
+					"name": "Queue End — Abandoned",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-abandon-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\",\n\t\"call_result\": \"ABANDON\",\n\t\"recording_url\": \"\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/queue/end",
+							"host": ["{{base_url}}"],
+							"path": ["queue", "end"]
+						},
+						"description": "Fires when a caller hangs up before being connected. Closes the associated Salesforce case and marks the call as ABANDONED."
+					}
+				},
+				{
+					"name": "Queue End — Deflected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"call_id\": \"call-deflect-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\",\n\t\"call_result\": \"DEFLECTED\",\n\t\"recording_url\": \"\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/queue/end",
+							"host": ["{{base_url}}"],
+							"path": ["queue", "end"]
+						},
+						"description": "Fires when a call is deflected out of the queue (e.g. voicemail, IVR redirect)."
+					}
+				}
+			]
+		},
+		{
+			"name": "Statuses",
+			"description": "Agent status change events — availability, breaks, engaged, login/logout, etc.",
+			"item": [
+				{
+					"name": "Status — Available",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"AVAILABLE\",\n\t\"event_aux_type\": \"AVAILABLE\",\n\t\"prev_state\": \"ENGAGED\",\n\t\"prev_aux_state\": \"ENGAGED\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent becomes available. If transitioning from ENGAGED, starts a 2-minute wrap-up timer. Updates Slack status to green circle."
+					}
+				},
+				{
+					"name": "Status — Engaged (On Call)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ENGAGED\",\n\t\"event_aux_type\": \"ENGAGED\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent is now on a call. Updates Slack status to telephone receiver emoji."
+					}
+				},
+				{
+					"name": "Status — Lunch",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"LUNCH\",\n\t\"event_aux_type\": \"LUNCH\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent goes on lunch break. Updates Slack status to hamburger emoji."
+					}
+				},
+				{
+					"name": "Status — On Break",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ON-BREAK\",\n\t\"event_aux_type\": \"ON-BREAK\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent goes on break. Updates Slack status to clock emoji."
+					}
+				},
+				{
+					"name": "Status — Training",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"TRAINING\",\n\t\"event_aux_type\": \"TRAINING\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent enters training mode."
+					}
+				},
+				{
+					"name": "Status — Outbound",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"OUTBOUND\",\n\t\"event_aux_type\": \"OUTBOUND\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent switches to outbound calling mode. Non-AVAILABLE status changes are ignored while in OUTBOUND."
+					}
+				},
+				{
+					"name": "Status — Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"LOGIN\",\n\t\"event_aux_type\": \"LOGIN\",\n\t\"prev_state\": \"OFF-LINE\",\n\t\"prev_aux_state\": \"OFF-LINE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent logs in. Records first login of the day and clears Slack status."
+					}
+				},
+				{
+					"name": "Status — Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"LOGOUT\",\n\t\"event_aux_type\": \"LOGOUT\",\n\t\"prev_state\": \"AVAILABLE\",\n\t\"prev_aux_state\": \"AVAILABLE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent logs out. Records first logout of the day and clears Slack status."
+					}
+				},
+				{
+					"name": "Status — RNA",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"RNA-STATE\",\n\t\"event_aux_type\": \"RNA-STATE\",\n\t\"prev_state\": \"RINGING\",\n\t\"prev_aux_state\": \"RINGING\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/statuses",
+							"host": ["{{base_url}}"],
+							"path": ["statuses"]
+						},
+						"description": "Agent entered Ring-No-Answer state. Updates Slack status to no-mobile-phones emoji."
+					}
+				}
+			]
+		},
+		{
+			"name": "Cases",
+			"description": "Salesforce case webhook — receives SOAP/XML payloads for closed cases.",
+			"item": [
+				{
+					"name": "Case Closed (XML SOAP)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/xml"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:sf=\"urn:sobject.enterprise.soap.sforce.com\">\n  <soapenv:Body>\n    <notifications xmlns=\"http://soap.sforce.com/2005/09/outbound\">\n      <Notification>\n        <sObject xmlns:sf=\"urn:sobject.enterprise.soap.sforce.com\" xsi:type=\"sf:Case\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n          <sf:Id>5001234567890ABCDEF</sf:Id>\n          <sf:CreatedById>0051234567890ABCDEF</sf:CreatedById>\n        </sObject>\n      </Notification>\n    </notifications>\n  </soapenv:Body>\n</soapenv:Envelope>"
+						},
+						"url": {
+							"raw": "{{base_url}}/cases/closed",
+							"host": ["{{base_url}}"],
+							"path": ["cases", "closed"]
+						},
+						"description": "Salesforce outbound message webhook. Fires when a case is closed. Sends a SOAP XML envelope containing the case ID and creator user ID."
+					}
+				}
+			]
+		},
+		{
+			"name": "Chats",
+			"description": "Chat endpoints (stub implementations — not fully built out yet).",
+			"item": [
+				{
+					"name": "Chat New",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"chat_id\": \"chat-001\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"customer_name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chats/new",
+							"host": ["{{base_url}}"],
+							"path": ["chats", "new"]
+						},
+						"description": "New chat event (stub — currently only logs the request)."
+					}
+				},
+				{
+					"name": "Chat Notify",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"chat_id\": \"chat-001\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"message\": \"Customer sent a new message\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chats/notify",
+							"host": ["{{base_url}}"],
+							"path": ["chats", "notify"]
+						},
+						"description": "Chat notification event (stub — currently only logs the request)."
+					}
+				}
+			]
+		},
+		{
+			"name": "Dashboard",
+			"description": "Real-time dashboard API — returns agents, queue, stats, and call lists.",
+			"item": [
+				{
+					"name": "Get Dashboard Data",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dashboard/{{dashboard_key}}/api",
+							"host": ["{{base_url}}"],
+							"path": ["dashboard", "{{dashboard_key}}", "api"]
+						},
+						"description": "Returns the full dashboard payload: agents (with status, active call, calls answered), queue entries, aggregate stats (total calls, avg queue time, avg call duration, etc.), and call lists (recent, longest, longest queue wait, abandoned)."
+					}
+				}
+			]
+		},
+		{
+			"name": "Flows",
+			"description": "End-to-end test sequences that simulate realistic call flows.",
+			"item": [
+				{
+					"name": "Happy Path — Inbound Call",
+					"description": "Simulate a full inbound call lifecycle: queue → ringing → answer → end.\nRun these requests in order.",
+					"item": [
+						{
+							"name": "1. Agent Login",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"LOGIN\",\n\t\"event_aux_type\": \"LOGIN\",\n\t\"prev_state\": \"OFF-LINE\",\n\t\"prev_aux_state\": \"OFF-LINE\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/statuses",
+									"host": ["{{base_url}}"],
+									"path": ["statuses"]
+								}
+							}
+						},
+						{
+							"name": "2. Agent Available",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"AVAILABLE\",\n\t\"event_aux_type\": \"AVAILABLE\",\n\t\"prev_state\": \"LOGIN\",\n\t\"prev_aux_state\": \"LOGIN\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/statuses",
+									"host": ["{{base_url}}"],
+									"path": ["statuses"]
+								}
+							}
+						},
+						{
+							"name": "3. Call Enters Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"flow-call-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"ani\": \"+15551234567\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/new",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "new"]
+								}
+							}
+						},
+						{
+							"name": "4. Call Ringing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"flow-call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"RINGING\",\n\t\"event_aux_type\": \"RINGING\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/calls/ringing",
+									"host": ["{{base_url}}"],
+									"path": ["calls", "ringing"]
+								}
+							}
+						},
+						{
+							"name": "5. Status → Engaged",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ENGAGED\",\n\t\"event_aux_type\": \"ENGAGED\",\n\t\"prev_state\": \"RINGING\",\n\t\"prev_aux_state\": \"RINGING\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/statuses",
+									"host": ["{{base_url}}"],
+									"path": ["statuses"]
+								}
+							}
+						},
+						{
+							"name": "6. Call Answered",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"flow-call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"call_recording\": \"https://media.ringcentral.com/recording/flow-001\",\n\t\"enqueue_time\": \"2026-02-18T16:00:00Z\",\n\t\"dequeue_time\": \"2026-02-18T16:01:00Z\",\n\t\"event_type\": \"ANSWER\",\n\t\"event_aux_type\": \"ANSWER\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/calls/answer",
+									"host": ["{{base_url}}"],
+									"path": ["calls", "answer"]
+								}
+							}
+						},
+						{
+							"name": "7. Queue Connected",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"flow-call-001\",\n\t\"caller_number\": \"+15551234567\",\n\t\"call_result\": \"CONNECTED\",\n\t\"recording_url\": \"https://media.ringcentral.com/recording/flow-001\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/end",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "end"]
+								}
+							}
+						},
+						{
+							"name": "8. Call Ends",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"flow-call-001\",\n\t\"ani\": \"+15551234567\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"ONE-TO-ONE\",\n\t\"recording_url\": \"https://media.ringcentral.com/recording/flow-001\",\n\t\"dnis\": \"\",\n\t\"call_start\": \"2026-02-18T16:01:00Z\",\n\t\"prev_state\": \"ACTIVE\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/calls/end",
+									"host": ["{{base_url}}"],
+									"path": ["calls", "end"]
+								}
+							}
+						},
+						{
+							"name": "9. Status → Available (Wrap-Up)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"agent_id\": \"agent-rc-001\",\n\t\"event_type\": \"AVAILABLE\",\n\t\"event_aux_type\": \"AVAILABLE\",\n\t\"prev_state\": \"ENGAGED\",\n\t\"prev_aux_state\": \"ENGAGED\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/statuses",
+									"host": ["{{base_url}}"],
+									"path": ["statuses"]
+								}
+							}
+						}
+					]
+				},
+				{
+					"name": "Abandoned Call",
+					"description": "Simulate a caller who hangs up while waiting in the queue.",
+					"item": [
+						{
+							"name": "1. Call Enters Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"abandon-call-001\",\n\t\"caller_number\": \"+15559999999\",\n\t\"ani\": \"+15559999999\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/new",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "new"]
+								}
+							}
+						},
+						{
+							"name": "2. Caller Abandons Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"abandon-call-001\",\n\t\"caller_number\": \"+15559999999\",\n\t\"call_result\": \"ABANDON\",\n\t\"recording_url\": \"\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/end",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "end"]
+								}
+							}
+						}
+					]
+				},
+				{
+					"name": "Callback Request",
+					"description": "Simulate a caller who requests a callback instead of waiting.",
+					"item": [
+						{
+							"name": "1. Call Enters Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"cb-call-001\",\n\t\"caller_number\": \"+15558888888\",\n\t\"ani\": \"+15558888888\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/new",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "new"]
+								}
+							}
+						},
+						{
+							"name": "2. Callback Requested",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"cb-call-001\",\n\t\"caller_number\": \"+15558888888\",\n\t\"ani\": \"+15558888888\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/queue/callback",
+									"host": ["{{base_url}}"],
+									"path": ["queue", "callback"]
+								}
+							}
+						},
+						{
+							"name": "3. Agent Calls Back (Answer)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"call_id\": \"cb-call-001-outbound\",\n\t\"ani\": \"+15558888888\",\n\t\"agent_id\": \"agent-rc-001\",\n\t\"call_recording\": \"https://media.ringcentral.com/recording/cb-001\",\n\t\"event_type\": \"ANSWER\",\n\t\"event_aux_type\": \"ANSWER\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/calls/answer",
+									"host": ["{{base_url}}"],
+									"path": ["calls", "answer"]
+								}
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

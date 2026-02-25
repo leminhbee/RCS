@@ -2,42 +2,65 @@ const ava = require('../AVA');
 const atp = require('../ATP');
 const moment = require('moment');
 const { broadcast } = require('./websocket');
+const { createStatusLog } = require('./log_schema');
+const { checkCallbackQueue } = require('./callback_timers');
 
 const WRAPUP_DURATION = 2 * 60 * 1000; // 2 minutes in ms
 
 // In-memory map of userId -> timerId (ATP statusSince is the source of truth)
 const activeTimers = new Map();
 
-function setAvailable(user) {
-  ava.status.update({
+async function setAvailable(user, logger) {
+  await ava.status.update({
     slackId: user.slackId,
     statusText: `Available @ ${moment(Date.now()).format('hh:mm a')}`,
     statusEmoji: ':large_green_circle:',
   });
-  atp.users.update(user.id, {
+  await atp.users.update(user.id, {
     currentStatus: 'AVAILABLE',
     statusSince: new Date(),
   });
-  broadcast();
+  await broadcast();
+
+  // Agent is now available — check if the next queued call is a callback
+  if (logger) {
+    await checkCallbackQueue(logger);
+  }
 }
 
-function startWrapUp(user, logger, delay = WRAPUP_DURATION) {
+async function startWrapUp(user, logger, delay = WRAPUP_DURATION) {
   clearWrapUp(user.id);
 
-  ava.status.update({
+  await ava.status.update({
     slackId: user.slackId,
     statusText: `Wrap Up @ ${moment(Date.now()).format('hh:mm a')}`,
     statusEmoji: ':hourglass_flowing_sand:',
   });
-  atp.users.update(user.id, {
+  await atp.users.update(user.id, {
     currentStatus: 'WRAP-UP',
     statusSince: new Date(),
   });
 
-  const timer = setTimeout(() => {
-    setAvailable(user);
-    activeTimers.delete(user.id);
-    logger.info({ event: 'WRAPUP_EXPIRED', userId: user.id, message: 'Wrap-up expired, agent set to AVAILABLE' });
+  const timer = setTimeout(async () => {
+    try {
+      await setAvailable(user, logger);
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          userId: user.id,
+          slackId: user.slackId,
+          status: 'AVAILABLE',
+          previousStatus: 'WRAP-UP',
+          data: {
+            statusText: `Available @ ${moment(Date.now()).format('hh:mm a')}`,
+            statusEmoji: ':large_green_circle:',
+            userName: user.nameFirst,
+          },
+        })
+      );
+    } finally {
+      activeTimers.delete(user.id);
+    }
   }, delay);
 
   activeTimers.set(user.id, timer);
@@ -64,18 +87,60 @@ async function recoverWrapUps(logger) {
 
     if (remaining > 0) {
       // Restart timer for remaining duration (skip setting AVA/ATP since already in WRAP-UP)
-      const timer = setTimeout(() => {
-        setAvailable(user);
-        activeTimers.delete(user.id);
-        logger.info({ event: 'WRAPUP_RECOVERY_EXPIRED', userId: user.id, message: 'Recovered wrap-up expired, agent set to AVAILABLE' });
+      const timer = setTimeout(async () => {
+        try {
+          await setAvailable(user, logger);
+          logger.info(
+            createStatusLog({
+              operation: 'update',
+              userId: user.id,
+              slackId: user.slackId,
+              status: 'AVAILABLE',
+              previousStatus: 'WRAP-UP',
+              data: {
+                statusText: `Available @ ${moment(Date.now()).format('hh:mm a')}`,
+                statusEmoji: ':large_green_circle:',
+                userName: user.nameFirst,
+                message: 'Recovered wrap-up expired, agent set to AVAILABLE',
+              },
+            })
+          );
+        } finally {
+          activeTimers.delete(user.id);
+        }
       }, remaining);
       activeTimers.set(user.id, timer);
 
-      logger.info({ event: 'WRAPUP_RECOVERED', userId: user.id, message: `Wrap-up timer recovered (${Math.round(remaining / 1000)}s remaining)` });
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          userId: user.id,
+          slackId: user.slackId,
+          status: 'WRAP-UP',
+          data: {
+            userName: user.nameFirst,
+            message: `Wrap-up timer recovered (${Math.round(remaining / 1000)}s remaining)`,
+          },
+        })
+      );
     } else {
       // Wrap-up already expired during downtime
-      setAvailable(user);
-      logger.info({ event: 'WRAPUP_RECOVERY_EXPIRED', userId: user.id, message: 'Wrap-up had expired during downtime, agent set to AVAILABLE' });
+      await setAvailable(user, logger);
+      logger.info(
+        createStatusLog({
+          operation: 'update',
+          userId: user.id,
+          slackId: user.slackId,
+          status: 'AVAILABLE',
+          previousStatus: 'WRAP-UP',
+          data: {
+            statusText: `Available @ ${moment(Date.now()).format('hh:mm a')}`,
+            statusEmoji: ':large_green_circle:',
+            userName: user.nameFirst,
+            message: 'Wrap-up had expired during downtime, agent set to AVAILABLE',
+          },
+        })
+      );
     }
   }
 }
