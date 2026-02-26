@@ -131,16 +131,24 @@ const fetchDashboardData = async () => {
   const mapCall = (c) => {
     const agent = userMap[c.userId];
     return {
+      callerNumber: maskNumber(c.callerNumber),
       callerName: c.callerName,
       companyName: c.companyName,
       agentName: agent ? `${agent.nameFirst} ${agent.nameLast}` : '--',
       duration: c.duration,
       queueDuration: c.queueDuration,
       endTime: c.endTime,
+      status: c.status || null,
+      outbound: c.outbound || false,
+      callbackRequested: c.callBackRequested || false,
+      salesforceCaseId: c.salesforceCaseId || null,
+      salesforceCaseNumber: c.salesforceCaseNumber || null,
+      callLink: c.callLink || null,
     };
   };
 
   const callLists = {
+    allCalls: [...allTodayCalls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).map(mapCall),
     recentCalls: [...answered].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).slice(0, 5).map(mapCall),
     longestCalls: [...answered].sort((a, b) => (b.duration || 0) - (a.duration || 0)).slice(0, 5).map(mapCall),
     longestQueue: [...finishedCalls].sort((a, b) => (b.queueDuration || 0) - (a.queueDuration || 0)).slice(0, 5).map(mapCall),
@@ -153,6 +161,10 @@ const fetchDashboardData = async () => {
 const getData = async (req, res) => {
   try {
     const data = await fetchDashboardData();
+    if (!req.session?.user?.supervisor) {
+      delete data.stats;
+      delete data.callLists;
+    }
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch dashboard data' });

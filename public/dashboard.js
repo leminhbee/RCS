@@ -1,4 +1,113 @@
 let dashboardData = { agents: [], queue: [], stats: {}, callLists: {} };
+let isSupervisor = false;
+
+// -- Call list column config --
+const DEFAULT_COLS = ['callerName', 'callerNumber', 'type', 'companyName', 'agentName', 'duration', 'queueDuration', 'endTime', 'sfCase'];
+const callType = (c) => {
+  if (c.status === 'ABANDONED') return 'Abandoned';
+  if (c.status === 'CALLBACK_FAILED') return 'CB Failed';
+  if (c.outbound) return 'Outbound';
+  if (c.callbackRequested) return 'Callback';
+  return 'Inbound';
+};
+const CALL_COLUMNS = {
+  callerName:    { label: 'Caller',        sortVal: c => c.callerName || '',                          render: c => c.callerName || '--' },
+  callerNumber:  { label: 'Phone',         sortVal: c => c.callerNumber || '',                        render: c => (c.callLink && c.callLink.startsWith('http')) ? `<a class="call-recording-link" href="${c.callLink}" target="_blank" rel="noopener">${c.callerNumber || '--'}</a>` : (c.callerNumber || '--') },
+  type:          { label: 'Type',          sortVal: c => callType(c),                                 render: c => callType(c) },
+  companyName:   { label: 'Company',       sortVal: c => c.companyName || '',                         render: c => c.companyName || '--' },
+  agentName:     { label: 'Agent',         sortVal: c => c.agentName || '',                           render: c => c.agentName || '--' },
+  duration:      { label: 'Call Duration', sortVal: c => c.duration || 0,                             render: c => formatSeconds(c.duration) },
+  queueDuration: { label: 'Queue Wait',    sortVal: c => c.queueDuration || 0,                        render: c => formatSeconds(c.queueDuration) },
+  endTime:       { label: 'Ended',         sortVal: c => c.endTime ? new Date(c.endTime).getTime() : 0, render: c => formatTimeAgo(c.endTime) },
+  sfCase:        { label: 'SF Case',       sortVal: c => c.salesforceCaseNumber || '',                render: c => c.salesforceCaseId && c.salesforceCaseNumber ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${c.salesforceCaseId}/view" target="_blank" rel="noopener">${c.salesforceCaseNumber}</a>` : '--' },
+};
+let colOrder = [...DEFAULT_COLS];
+let colHidden = new Set();
+let callSearch = '';
+let sortKey = null;
+let sortDir = 'asc';
+
+function loadColPrefs() {
+  try {
+    const saved = localStorage.getItem('callListCols');
+    if (!saved) return;
+    const { order, hidden } = JSON.parse(saved);
+    if (Array.isArray(order)) {
+      const known = order.filter(k => CALL_COLUMNS[k]);
+      const added = DEFAULT_COLS.filter(k => !known.includes(k));
+      colOrder = [...known, ...added];
+    }
+    if (Array.isArray(hidden)) colHidden = new Set(hidden.filter(k => CALL_COLUMNS[k]));
+  } catch (e) {}
+}
+
+function saveColPrefs() {
+  localStorage.setItem('callListCols', JSON.stringify({ order: colOrder, hidden: [...colHidden] }));
+}
+
+let dragSrcKey = null;
+
+function renderColPicker() {
+  const panel = document.getElementById('col-picker-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  for (const key of colOrder) {
+    const col = CALL_COLUMNS[key];
+    const item = document.createElement('div');
+    item.className = 'col-picker-item';
+    item.dataset.key = key;
+    item.draggable = true;
+    item.innerHTML = `
+      <span class="col-picker-handle">&#8942;&#8942;</span>
+      <label class="col-picker-label">
+        <input type="checkbox" ${colHidden.has(key) ? '' : 'checked'}>
+        ${col.label}
+      </label>`;
+    item.querySelector('input').addEventListener('change', (e) => {
+      if (e.target.checked) colHidden.delete(key); else colHidden.add(key);
+      saveColPrefs();
+      renderCallList();
+    });
+    item.addEventListener('dragstart', (e) => {
+      dragSrcKey = key;
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      panel.querySelectorAll('.col-picker-item').forEach(el => el.classList.remove('drag-over'));
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      panel.querySelectorAll('.col-picker-item').forEach(el => el.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      if (dragSrcKey === key) return;
+      const srcIdx = colOrder.indexOf(dragSrcKey);
+      const dstIdx = colOrder.indexOf(key);
+      colOrder.splice(srcIdx, 1);
+      colOrder.splice(dstIdx, 0, dragSrcKey);
+      saveColPrefs();
+      renderColPicker();
+      renderCallList();
+    });
+    panel.appendChild(item);
+  }
+  const footer = document.createElement('div');
+  footer.className = 'col-picker-footer';
+  footer.innerHTML = '<button>Reset to defaults</button>';
+  footer.querySelector('button').addEventListener('click', () => {
+    colOrder = [...DEFAULT_COLS];
+    colHidden = new Set();
+    saveColPrefs();
+    renderColPicker();
+    renderCallList();
+  });
+  panel.appendChild(footer);
+}
 
 // Timezone toggle (only relevant if viewer is not in Central)
 const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -24,6 +133,32 @@ toggle.addEventListener('click', () => {
   applyTheme(!document.body.classList.contains('dark'));
 });
 applyTheme(localStorage.getItem('theme') === 'dark');
+
+// Nav panel toggles
+const appPanel = document.getElementById('app-panel');
+const profilePanel = document.getElementById('profile-panel');
+
+document.getElementById('app-launcher-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  profilePanel.classList.remove('open');
+  appPanel.classList.toggle('open');
+});
+
+document.getElementById('profile-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  appPanel.classList.remove('open');
+  profilePanel.classList.toggle('open');
+});
+
+// Keep panels open when clicking inside them
+appPanel.addEventListener('click', (e) => e.stopPropagation());
+profilePanel.addEventListener('click', (e) => e.stopPropagation());
+
+// Close panels on outside click
+document.addEventListener('click', () => {
+  appPanel.classList.remove('open');
+  profilePanel.classList.remove('open');
+});
 
 function formatDuration(since) {
   if (!since) return '--';
@@ -181,6 +316,7 @@ function renderLive() {
 }
 
 function renderStats() {
+  if (!isSupervisor) return;
   const s = dashboardData.stats || {};
   const grid = document.getElementById('stats-grid');
   const cards = [
@@ -204,6 +340,7 @@ function renderStats() {
 }
 
 function renderCallList() {
+  if (!isSupervisor) return;
   const container = document.getElementById('recent-calls-table');
   const selected = document.getElementById('call-list-select').value;
   const calls = (dashboardData.callLists || {})[selected] || [];
@@ -213,22 +350,61 @@ function renderCallList() {
     return;
   }
 
-  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Caller</th><th>Company</th><th>Agent</th><th>Call Duration</th><th>Queue Wait</th><th>Ended</th></tr></thead><tbody>';
-  for (const call of calls) {
-    html += `<tr>
-      <td>${call.callerName || '--'}</td>
-      <td>${call.companyName || '--'}</td>
-      <td>${call.agentName || '--'}</td>
-      <td>${formatSeconds(call.duration)}</td>
-      <td>${formatSeconds(call.queueDuration)}</td>
-      <td>${formatTimeAgo(call.endTime)}</td>
-    </tr>`;
+  const q = callSearch.toLowerCase().trim();
+  const filtered = q ? calls.filter(c => [
+    c.callerName, c.callerNumber, c.companyName, c.agentName, c.salesforceCaseNumber,
+  ].some(v => v && v.toLowerCase().includes(q))) : calls;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty">No calls match your search</div>';
+    return;
+  }
+
+  let sorted = filtered;
+  if (sortKey && CALL_COLUMNS[sortKey]) {
+    const sv = CALL_COLUMNS[sortKey].sortVal;
+    sorted = [...filtered].sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const visibleCols = colOrder.filter(k => !colHidden.has(k));
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of visibleCols) {
+    const active = sortKey === key;
+    const indicator = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-sort-key="${key}">${CALL_COLUMNS[key].label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const call of sorted) {
+    html += '<tr>';
+    for (const key of visibleCols) html += `<td>${CALL_COLUMNS[key].render(call)}</td>`;
+    html += '</tr>';
   }
   html += '</tbody></table>';
   container.innerHTML = html;
-}
 
-document.getElementById('call-list-select').addEventListener('change', renderCallList);
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-sort-key]');
+    if (!th) return;
+    const key = th.dataset.sortKey;
+    if (sortKey === key) {
+      if (sortDir === 'asc') {
+        sortDir = 'desc';
+      } else {
+        sortKey = null;
+        sortDir = 'asc';
+      }
+    } else {
+      sortKey = key;
+      sortDir = 'asc';
+    }
+    renderCallList();
+  });
+}
 
 function render() {
   renderAgents();
@@ -236,6 +412,72 @@ function render() {
   renderLive();
   renderStats();
   renderCallList();
+}
+
+// -- Supervisor init: inject stats section and connect WS --
+async function init() {
+  const basePath = location.pathname.replace(/\/$/, '');
+  try {
+    const res = await fetch(`${basePath}/api/me`);
+    const user = await res.json();
+
+    // Populate MS nav profile
+    if (user?.name) {
+      const initials = user.name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2);
+      document.getElementById('ms-avatar').textContent = initials;
+      document.getElementById('ms-avatar-lg').textContent = initials;
+      document.getElementById('ms-profile-name').textContent = user.name;
+    }
+    if (user?.email) {
+      document.getElementById('ms-profile-email').textContent = user.email;
+    }
+    if (user?.supervisor) {
+      document.getElementById('ms-profile-badge').style.display = 'inline-block';
+    }
+
+    if (user?.supervisor) {
+      isSupervisor = true;
+      document.getElementById('stats-container').innerHTML = `
+        <div class="card mb-3">
+          <div class="card-header"><strong>Today's Stats</strong></div>
+          <div class="card-body">
+            <div class="row g-2 mb-3" id="stats-grid"></div>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <select class="call-list-select" id="call-list-select">
+                <option value="allCalls">All Calls</option>
+                <option value="recentCalls">Recent Calls</option>
+                <option value="longestCalls">Longest Calls</option>
+                <option value="longestQueue">Longest Queue</option>
+                <option value="abandonedCalls">Abandoned Calls</option>
+              </select>
+              <input type="search" id="call-search" class="call-list-search" placeholder="Search…" autocomplete="off">
+              <div class="col-picker-wrap ms-auto">
+                <button class="col-picker-btn" id="col-picker-btn">&#9881; Columns</button>
+                <div class="col-picker-panel" id="col-picker-panel"></div>
+              </div>
+            </div>
+            <div id="recent-calls-table"></div>
+          </div>
+        </div>`;
+      document.getElementById('call-list-select').addEventListener('change', renderCallList);
+      document.getElementById('call-search').addEventListener('input', (e) => {
+        callSearch = e.target.value;
+        renderCallList();
+      });
+      const pickerBtn = document.getElementById('col-picker-btn');
+      const pickerPanel = document.getElementById('col-picker-panel');
+      pickerBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pickerPanel.classList.toggle('open');
+      });
+      document.addEventListener('click', () => pickerPanel.classList.remove('open'));
+      pickerPanel.addEventListener('click', (e) => e.stopPropagation());
+      renderColPicker();
+    }
+  } catch (e) {
+    console.error('Failed to fetch user session:', e);
+  }
+  connectWebSocket();
 }
 
 // -- WebSocket connection with auto-reconnect --
@@ -281,5 +523,6 @@ function connectWebSocket() {
 
 // Update ticking timers every 1 second
 setInterval(render, 1000);
-// Connect WebSocket
-connectWebSocket();
+// Load saved column preferences, then init
+loadColPrefs();
+init();

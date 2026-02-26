@@ -9,13 +9,122 @@
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-  <div class="container py-3" style="max-width: 1400px;">
-    <div class="d-flex justify-content-center align-items-center mb-4 position-relative">
-      <h1 class="mb-0">Queue Dashboard</h1>
-      <button class="theme-toggle position-absolute end-0" id="theme-toggle" title="Toggle dark mode">
+
+  <!-- Microsoft-style nav bar -->
+  <nav class="ms-nav">
+    <div class="ms-nav-left">
+      <button class="ms-icon-btn" id="app-launcher-btn" title="App launcher" aria-label="App launcher">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
+          <rect x="0" y="0" width="5" height="5" rx="1"/>
+          <rect x="6.5" y="0" width="5" height="5" rx="1"/>
+          <rect x="13" y="0" width="5" height="5" rx="1"/>
+          <rect x="0" y="6.5" width="5" height="5" rx="1"/>
+          <rect x="6.5" y="6.5" width="5" height="5" rx="1"/>
+          <rect x="13" y="6.5" width="5" height="5" rx="1"/>
+          <rect x="0" y="13" width="5" height="5" rx="1"/>
+          <rect x="6.5" y="13" width="5" height="5" rx="1"/>
+          <rect x="13" y="13" width="5" height="5" rx="1"/>
+        </svg>
+      </button>
+      <span class="ms-app-name">Queue Dashboard</span>
+    </div>
+    <div class="ms-nav-right">
+      <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
         <span class="knob" id="toggle-icon">&#9788;</span>
       </button>
+      <button class="ms-icon-btn ms-profile-btn" id="profile-btn" aria-label="Account manager" title="Account manager">
+        <span class="ms-avatar" id="ms-avatar">?</span>
+      </button>
     </div>
+  </nav>
+
+  <!-- App launcher panel -->
+  <div class="ms-panel ms-app-panel" id="app-panel">
+    <div class="ms-app-panel-heading">Apps</div>
+    <div class="ms-app-grid">
+      <a class="ms-app-tile" href="https://outlook.office.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#0078d4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6zm-2 0l-8 5-8-5h16zm0 12H4V8l8 5 8-5v10z"/></svg>
+        </div>
+        <span>Outlook</span>
+      </a>
+      <a class="ms-app-tile" href="https://teams.microsoft.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#6264a7">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M17 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm-8-2c1.7 0 3-1.3 3-3S10.7 4 9 4 6 5.3 6 7s1.3 3 3 3zm8 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm-8 0c-.3 0-.7 0-1 .1C9.3 12.5 11 13.7 11 14v2H2v-2c0-2.7 5.3-4 7-4z"/></svg>
+        </div>
+        <span>Teams</span>
+      </a>
+      <a class="ms-app-tile" href="https://www.office.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#d83b01">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M3 3h8v8H3zm0 10h8v8H3zM13 3h8v8h-8zm0 10h8v8h-8z"/></svg>
+        </div>
+        <span>Microsoft 365</span>
+      </a>
+      <a class="ms-app-tile" href="https://sharepoint.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#038387">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+        </div>
+        <span>SharePoint</span>
+      </a>
+      <a class="ms-app-tile" href="https://onedrive.live.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#094ab2">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+        </div>
+        <span>OneDrive</span>
+      </a>
+    </div>
+    <div class="ms-panel-divider" style="margin-top:10px"></div>
+    <div class="ms-panel-title">Alula</div>
+    <div class="ms-app-grid">
+      <a class="ms-app-tile" href="https://www.alula.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#e8480c">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 19h20L12 2zm0 3.5L19.5 17h-15L12 5.5zM11 10v4h2v-4h-2zm0 5v2h2v-2h-2z"/></svg>
+        </div>
+        <span>Alula</span>
+      </a>
+      <a class="ms-app-tile" href="https://www.alulaconnect.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#0f7dc2">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/><path d="M8 10.5C8 9.1 9.1 8 10.5 8S13 9.1 13 10.5 11.9 13 10.5 13 8 11.9 8 10.5zm5.5 0c0 .8.7 1.5 1.5 1.5s1.5-.7 1.5-1.5S15.8 9 15 9s-1.5.7-1.5 1.5z"/></svg>
+        </div>
+        <span>Alula Connect</span>
+      </a>
+      <a class="ms-app-tile" href="https://ipdatatel.lightning.force.com" target="_blank" rel="noopener">
+        <div class="ms-app-icon" style="background:#00a1e0">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M19.5 7c-1.3 0-2.4.8-2.8 2H14c-.4-2.3-2.4-4-4.8-4C6.3 5 4 7.5 4 10.5c0 .2 0 .5.1.7C2.8 11.8 2 13.1 2 14.5 2 16.4 3.6 18 5.5 18H19c2.2 0 4-1.8 4-4 0-1.8-1.2-3.4-2.9-3.8C20 9.8 20 9.4 20 9c0-1.1-.9-2-2-2h1.5z"/></svg>
+        </div>
+        <span>Salesforce</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Profile panel -->
+  <div class="ms-panel ms-profile-panel" id="profile-panel">
+    <div class="ms-profile-topbar">
+      <span class="ms-profile-org">Alula</span>
+      <a href="/auth/logout" class="ms-profile-topbar-signout">Sign out</a>
+    </div>
+    <div class="ms-profile-main">
+      <div class="ms-avatar-ring" id="ms-avatar-lg">?</div>
+      <div class="ms-profile-name" id="ms-profile-name">Loading...</div>
+      <div class="ms-profile-email" id="ms-profile-email"></div>
+      <div class="ms-profile-badge" id="ms-profile-badge" style="display:none">Supervisor</div>
+      <a href="https://myaccount.microsoft.com" target="_blank" rel="noopener" class="ms-view-account-btn">View account</a>
+    </div>
+    <div class="ms-panel-divider"></div>
+    <a href="/auth/logout" class="ms-switch-account-row">
+      <div class="ms-switch-icon-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="10" cy="7" r="4"/>
+          <path d="M2 21c0-4 3.6-7 8-7"/>
+          <line x1="18" y1="13" x2="18" y2="21"/>
+          <line x1="14" y1="17" x2="22" y2="17"/>
+        </svg>
+      </div>
+      <span>Sign in with a different account</span>
+    </a>
+  </div>
+
+  <div class="container py-3" style="max-width: 1400px;">
 
     <div class="card mb-3">
       <div class="card-header d-flex align-items-center gap-2">
@@ -50,19 +159,7 @@
       </div>
     </div>
 
-    <div class="card mb-3">
-      <div class="card-header"><strong>Today's Stats</strong></div>
-      <div class="card-body">
-        <div class="row g-2 mb-3" id="stats-grid"></div>
-        <select class="call-list-select mb-2" id="call-list-select">
-          <option value="recentCalls">Recent Calls</option>
-          <option value="longestCalls">Longest Calls</option>
-          <option value="longestQueue">Longest Queue</option>
-          <option value="abandonedCalls">Abandoned Calls</option>
-        </select>
-        <div id="recent-calls-table"></div>
-      </div>
-    </div>
+    <div id="stats-container"></div>
   </div>
 
   <script src="dashboard.js"></script>

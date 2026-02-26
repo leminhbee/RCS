@@ -8,6 +8,7 @@ const createCall = async (createdCase, body) => {
     userId: body.alulaUser.id,
     caseCreated: true,
     salesforceCaseId: createdCase.id,
+    salesforceCaseNumber: createdCase.CaseNumber,
     startTime: new Date(),
   });
   logger.info({ callRecordCreated }, 'Call record created');

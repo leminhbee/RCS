@@ -1,5 +1,4 @@
-body { background: #e8eaed; }
-h1 { color: #1779ba; }
+body { background: #e8eaed; margin: 0; }
 .count { background: #1779ba; padding: 2px 10px; border-radius: 12px; font-size: 0.85rem; color: #fff; }
 .empty { text-align: center; padding: 40px; color: #6b7280; }
 .duration { font-variant-numeric: tabular-nums; }
@@ -38,8 +37,47 @@ h1 { color: #1779ba; }
 .live-value { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .live-detail { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
 
+/* Call recording link in table */
+.call-recording-link { text-decoration: none; text-decoration-skip-ink: none; }
+.call-recording-link:hover { text-decoration: underline; }
+
 /* Call list dropdown */
 .call-list-select { font-size: 1.1rem; font-weight: 600; background: transparent; border: none; cursor: pointer; font-family: inherit; }
+
+/* Sortable table headers */
+.sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.sort-th:hover { background: rgba(0,0,0,0.04); }
+.sort-th.sort-active { color: #4f46e5; }
+
+/* Call list search */
+.call-list-search { font-size: 0.85rem; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 10px; font-family: inherit; background: #fff; color: #111827; min-width: 180px; }
+.call-list-search:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
+
+/* Column picker */
+.col-picker-wrap { position: relative; }
+.col-picker-btn { background: transparent; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer; color: #374151; font-family: inherit; }
+.col-picker-btn:hover { background: #f3f4f6; }
+.col-picker-panel { display: none; position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 180px; padding: 4px 0; }
+.col-picker-panel.open { display: block; }
+.col-picker-item { display: flex; align-items: center; padding: 5px 12px; cursor: grab; user-select: none; gap: 8px; }
+.col-picker-item:hover { background: #f9fafb; }
+.col-picker-item.drag-over { background: #dbeafe; }
+.col-picker-item.dragging { opacity: 0.4; }
+.col-picker-handle { color: #9ca3af; font-size: 0.85rem; cursor: grab; line-height: 1; }
+.col-picker-label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; margin: 0; }
+.col-picker-footer { padding: 5px 12px 4px; border-top: 1px solid #e5e7eb; margin-top: 4px; }
+.col-picker-footer button { font-size: 0.75rem; background: none; border: none; color: #6b7280; cursor: pointer; padding: 2px 0; font-family: inherit; }
+.col-picker-footer button:hover { color: #111; text-decoration: underline; }
+body.dark .col-picker-btn { border-color: #2a3f55; color: #e0e8f0; }
+body.dark .col-picker-btn:hover { background: #1a2d42; }
+body.dark .col-picker-panel { background: #1a2d42; border-color: #2a3f55; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+body.dark .col-picker-item:hover { background: #0e1e2f; }
+body.dark .col-picker-item.drag-over { background: #1e3a5f; }
+body.dark .col-picker-handle { color: #4a5568; }
+body.dark .col-picker-label { color: #e0e8f0; }
+body.dark .col-picker-footer { border-top-color: #2a3f55; }
+body.dark .col-picker-footer button { color: #8899aa; }
+body.dark .col-picker-footer button:hover { color: #e0e8f0; }
 
 /* Toggle button */
 .theme-toggle { background: #d0d3d8; border: none; border-radius: 20px; width: 48px; height: 26px; cursor: pointer; display: flex; align-items: center; padding: 3px; transition: background 0.3s; flex-shrink: 0; }
@@ -78,5 +116,256 @@ body.dark .stat-card.stat-abandoned .stat-value { color: #f16036; }
 body.dark .stat-card.stat-outbound .stat-value { color: #037fff; }
 body.dark .stat-card.stat-callback .stat-value { color: #ffae00; }
 body.dark .call-list-select { color: #fff; }
+body.dark .sort-th:hover { background: rgba(255,255,255,0.06); }
+body.dark .sort-th.sort-active { color: #818cf8; }
+body.dark .call-list-search { background: #1f2937; border-color: #374151; color: #f9fafb; }
+body.dark .call-list-search:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
 body.dark .theme-toggle { background: #1779ba; }
 body.dark .theme-toggle .knob { transform: translateX(22px); }
+
+/* ── Microsoft-style nav bar ── */
+.ms-nav {
+  background: #0078d4;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+.ms-nav-left, .ms-nav-right { display: flex; align-items: center; gap: 4px; }
+
+.ms-app-name {
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.ms-icon-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.ms-icon-btn:hover { background: rgba(255,255,255,0.15); }
+
+.ms-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  color: #0078d4;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.ms-profile-btn { width: 40px; height: 40px; border-radius: 50%; }
+.ms-profile-btn:hover { background: rgba(255,255,255,0.15); }
+
+/* Theme toggle in the nav bar */
+.ms-nav .theme-toggle { background: rgba(255,255,255,0.2); margin: 0 4px; }
+.ms-nav .theme-toggle .knob { background: #fff; color: #0078d4; }
+body.dark .ms-nav .theme-toggle { background: rgba(255,255,255,0.2); }
+body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
+
+/* ── Dropdown panels ── */
+.ms-panel {
+  position: fixed;
+  top: 48px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  z-index: 999;
+  display: none;
+}
+.ms-panel.open { display: block; }
+
+.ms-panel-title {
+  font-size: 0.8rem;
+  color: #666;
+  padding: 14px 16px 8px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* App launcher panel */
+.ms-app-panel {
+  left: 8px;
+  width: 360px;
+  padding-bottom: 14px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+
+.ms-app-panel-heading {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111;
+  padding: 16px 16px 10px;
+}
+
+.ms-app-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.ms-app-tile {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  text-decoration: none;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ms-app-tile:hover { background: #f0f6ff; color: #333; }
+
+.ms-app-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ms-app-tile span { font-size: 0.85rem; text-align: left; line-height: 1.2; }
+
+/* Profile panel */
+.ms-profile-panel { right: 8px; width: 320px; overflow: hidden; }
+
+.ms-profile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid #e8e8e8;
+}
+.ms-profile-org { font-size: 0.85rem; color: #333; }
+.ms-profile-topbar-signout {
+  color: #0078d4;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.ms-profile-topbar-signout:hover { text-decoration: underline; }
+
+.ms-profile-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 20px 22px;
+  text-align: center;
+}
+
+.ms-avatar-ring {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 1px solid #aaa;
+  background: #f8f8f8;
+  color: #333;
+  font-size: 1.5rem;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  letter-spacing: 0.02em;
+}
+
+.ms-profile-name { font-weight: 700; font-size: 1.1rem; margin-bottom: 3px; }
+.ms-profile-email { font-size: 0.85rem; color: #555; margin-bottom: 14px; }
+
+.ms-profile-badge {
+  font-size: 0.7rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: 1px 8px;
+  border-radius: 10px;
+  display: inline-block;
+  margin-bottom: 14px;
+}
+
+.ms-view-account-btn {
+  display: inline-block;
+  color: #0067b8;
+  text-decoration: none;
+  font-size: 0.85rem;
+  border: 1px solid #0067b8;
+  padding: 5px 18px;
+  border-radius: 2px;
+  transition: background 0.15s, color 0.15s;
+}
+.ms-view-account-btn:hover { background: #0067b8; color: #fff; }
+
+.ms-panel-divider { height: 1px; background: #e0e0e0; }
+
+.ms-switch-account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #f2f2f2;
+  text-decoration: none;
+  color: #333;
+  transition: background 0.15s;
+}
+.ms-switch-account-row:hover { background: #e5e5e5; color: #333; }
+.ms-switch-account-row span { font-size: 0.85rem; }
+
+.ms-switch-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ccc;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── Dark mode: panels ── */
+body.dark .ms-panel { background: #1a2d42; border-color: #2a3f55; }
+body.dark .ms-panel-title { color: #8899aa; }
+
+body.dark .ms-app-panel-heading { color: #f0f2f3; }
+body.dark .ms-app-tile { color: #e0e8f0; }
+body.dark .ms-app-tile:hover { background: #0e1e2f; color: #e0e8f0; }
+
+body.dark .ms-profile-topbar { border-bottom-color: #2a3f55; }
+body.dark .ms-profile-org { color: #e0e8f0; }
+body.dark .ms-profile-topbar-signout { color: #60a5fa; }
+body.dark .ms-avatar-ring { border-color: #4a5568; background: #1e2d3d; color: #e0e8f0; }
+body.dark .ms-profile-name { color: #f0f2f3; }
+body.dark .ms-profile-email { color: #8899aa; }
+body.dark .ms-view-account-btn { color: #60a5fa; border-color: #60a5fa; }
+body.dark .ms-view-account-btn:hover { background: #60a5fa; color: #071323; }
+body.dark .ms-panel-divider { background: #2a3f55; }
+body.dark .ms-switch-account-row { background: #132133; color: #e0e8f0; }
+body.dark .ms-switch-account-row:hover { background: #0e1e2f; color: #e0e8f0; }
+body.dark .ms-switch-icon-wrap { background: #2a3f55; color: #8899aa; }
