@@ -23,6 +23,8 @@ const mutex = new Mutex();
 app.use(express.json());
 // text/json (some webhooks may send JSON but with text/json header)
 app.use(express.text({ type: 'text/json' }));
+// URL-encoded (HTML form submissions)
+app.use(express.urlencoded({ extended: false }));
 // XML (parse into JS object)
 app.use(xmlparser({ explicitArray: false, type: ['application/xml', 'text/xml'] }));
 
@@ -40,6 +42,16 @@ const requireAuth = require('./auth/authMiddleware');
 app.use('/dashboard', requireAuth, express.static(path.join(__dirname, '../public')));
 app.use('/dashboard', requireAuth, dashboardRouter);
 app.get('/', (req, res) => res.redirect('/dashboard'));
+
+// -- CORS preflight for RC browser-based webhook testing --
+app.options('/calls/transfer', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, dashboard_key',
+  });
+  res.sendStatus(204);
+});
 
 // -- Message ID Middleware --
 app.use((req, res, next) => {

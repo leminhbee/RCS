@@ -13,6 +13,24 @@ const handleRequest = async (req, res) => {
   try {
     // Skip Slack updates for supervisors, but persist status for dashboard
     if (user.supervisor) {
+      // If supervisor goes ENGAGED with a call_id that belongs to another agent,
+      // they're monitoring (silent listen) — skip the status update so they don't appear as on a call
+      if (body.event_aux_type === 'ENGAGED' && req.callRecord && req.callRecord.userId && req.callRecord.userId !== user.id) {
+        logger.info(
+          createStatusLog({
+            operation: 'update',
+            messageId,
+            status: body.event_aux_type,
+            data: {
+              message: 'Supervisor monitoring detected - status update skipped',
+              monitoredCallId: req.callRecord.callId,
+              monitoredUserId: req.callRecord.userId,
+            },
+          })
+        );
+        return;
+      }
+
       await atp.users.update(user.id, {
         currentStatus: body.event_aux_type,
         statusSince: new Date(),

@@ -1,6 +1,5 @@
-const axios = require('axios');
-const atp_url = process.env.ATP_URL;
-const { validate: isUUID } = require('uuid'); // Import the UUID validation function
+const axios = require('./client');
+const { validate: isUUID } = require('uuid');
 
 /**
  * Fetches a user record from the ATP API.
@@ -16,14 +15,14 @@ async function fetchOne(params) {
     let response;
     if (typeof params === 'object' && params !== null) {
       // Use the findOne endpoint for filter-based searches.
-      response = await axios.get(`${atp_url}/users/findOne`, {
+      response = await axios.get(`/users/findOne`, {
         params: { filter: params },
       });
       // The API returns null for no results, so we can directly return the data.
       return response.data;
     } else if (typeof params === 'string' && isUUID(params)) {
       // Use the specific ID endpoint for UUID-based searches.
-      response = await axios.get(`${atp_url}/users/${params}`);
+      response = await axios.get(`/users/${params}`);
       // The API returns the user object if found.
       return response.data;
     } else {
@@ -52,7 +51,7 @@ async function fetchOne(params) {
  */
 async function fetchAll(filter) {
   try {
-    const response = await axios.get(`${atp_url}/users`, {
+    const response = await axios.get(`/users`, {
       params: filter ? { filter } : {},
     });
     return response.data;
@@ -70,10 +69,30 @@ async function fetchAll(filter) {
  */
 async function update(id, data) {
   try {
-    const response = await axios.patch(`${atp_url}/users/${id}`, data);
+    const response = await axios.patch(`/users/${id}`, data);
     return response.data;
   } catch (error) {
     throw new Error('Error updating user record in ATP: ' + error.message);
+  }
+}
+
+/**
+ * Authenticates a user by email and password against the ATP API.
+ * ATP handles the bcrypt comparison server-side.
+ * @param {string} email - The user's email address.
+ * @param {string} password - The raw password to verify.
+ * @returns {Promise<object|null>} The user object on success, or null if credentials are invalid.
+ * @throws {Error} If a network error occurs.
+ */
+async function authenticate(email, password) {
+  try {
+    const response = await axios.post('/users/authenticate', { email, password });
+    return response.data;
+  } catch (error) {
+    if (error.response && error.response.status === 401) {
+      return null;
+    }
+    throw new Error('Error authenticating user via ATP: ' + error.message);
   }
 }
 
@@ -81,4 +100,5 @@ module.exports = {
   fetchOne,
   fetchAll,
   update,
+  authenticate,
 };

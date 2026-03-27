@@ -6,6 +6,22 @@ const ava = require('../AVA');
 const moment = require('moment');
 const { clearCallbackTimer } = require('../helpers/callback_timers');
 
+/**
+ * Parse a datetime string that's in America/Chicago (Central Time).
+ * Automatically handles CST (UTC-6) vs CDT (UTC-5) without hardcoding an offset.
+ */
+function parseCentralTime(dateStr) {
+  const approx = new Date(dateStr.replace(' ', 'T') + 'Z');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(approx);
+  const get = type => parts.find(p => p.type === type).value;
+  const ctAsUtc = new Date(`${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}Z`);
+  return new Date(approx.getTime() + (approx - ctAsUtc));
+}
 
 const answer = async (req) => {
   const { messageId, body, logger, callRecord } = req;
@@ -186,9 +202,11 @@ const end = async (req) => {
     // ONE-TO-ONE-OUTBOUND: outbound call ended (no prior /calls/answer)
     if (body.event_type === 'ONE-TO-ONE-OUTBOUND') {
       const callerNumber = body.dnis;
-      const startTime = body.call_start ? new Date(body.call_start.replace(' ', 'T') + '-05:00') : new Date();
       const endTime = new Date();
-      const callDuration = (endTime - startTime) / 1000;
+      const startTime = body.call_start ? parseCentralTime(body.call_start) : endTime;
+      const callDuration = body.call_duration
+        ? Number(body.call_duration)
+        : (endTime - startTime) / 1000;
 
       // Search for most recent call by dnis + user for today
       const todayStart = new Date();
@@ -474,8 +492,42 @@ const ringing = async (req) => {
   }
 };
 
+const transfer = async (req) => {
+  const { messageId, body, logger, callRecord } = req;
+  const user = body.alulaUser;
+
+  try {
+    logger.info(
+      createCallLog({
+        operation: 'transfer',
+        messageId,
+        ani: body.ani,
+        callId: body.call_id,
+        userId: user?.id,
+        callRecordId: callRecord?.id,
+        data: {
+          message: 'Transfer event received',
+          body,
+        },
+      })
+    );
+  } catch (error) {
+    logger.error({
+      ...createCallLog({
+        operation: 'transfer',
+        messageId,
+        ani: body.ani,
+        callId: body.call_id,
+        userId: user?.id,
+      }),
+      ...formatError(error),
+    });
+  }
+};
+
 module.exports = {
   answer,
   end,
   ringing,
+  transfer,
 };

@@ -8,4 +8,6 @@ router.post('/end', withQueue(callsController.end));
 
 router.post('/ringing', withQueue(callsController.ringing));
 
+router.post('/transfer', withQueue(callsController.transfer));
+
 module.exports = router;

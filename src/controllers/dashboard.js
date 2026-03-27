@@ -2,6 +2,7 @@ const atp = require('../ATP');
 const { sfdcConn } = require('../config/sfdc');
 const { broadcast } = require('../helpers/websocket');
 const { clearCallbackTimer } = require('../helpers/callback_timers');
+const { getVisibilityConfig, canAccess, getPermissions } = require('../helpers/dashboardAccess');
 
 const OFFLINE_STATUSES = [null, 'LOGOUT', 'OFF-LINE'];
 const SUPERVISOR_VISIBLE_STATUSES = ['AVAILABLE', 'ENGAGED'];
@@ -21,16 +22,18 @@ const maskNumber = (number) => {
   return number;
 };
 
-const fetchDashboardData = async () => {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+const fetchDashboardData = async (date) => {
+  const dayStart = new Date(date || new Date());
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
 
   const [users, activeCalls, finishedCalls] = await Promise.all([
     atp.users.fetchAll({ callsActive: true }),
     atp.calls.fetchAll({ status: ['QUEUED', 'CALLBACK_REQUESTED', 'RINGING', 'ACTIVE'] }),
     atp.calls.fetchAll({
       status: ['COMPLETE', 'ABANDONED', 'CALLBACK_FAILED'],
-      startTimeAfter: todayStart.toISOString(),
+      startTime: { $gte: dayStart.toISOString(), $lt: dayEnd.toISOString() },
     }),
   ]);
 
@@ -98,8 +101,12 @@ const fetchDashboardData = async () => {
       ringing: c.status === 'RINGING',
     }));
 
-  // Stats: today's totals
-  const todayActive = activeCalls.filter((c) => new Date(c.startTime) >= todayStart);
+  // Stats: only include active calls in stats when viewing today
+  const now = new Date();
+  const isViewingToday = dayStart.getFullYear() === now.getFullYear() &&
+    dayStart.getMonth() === now.getMonth() &&
+    dayStart.getDate() === now.getDate();
+  const dayActive = isViewingToday ? activeCalls.filter((c) => c.status === 'ACTIVE' && new Date(c.startTime) >= dayStart) : [];
   const answered = finishedCalls.filter((c) => c.status === 'COMPLETE');
   const abandoned = finishedCalls.filter((c) => c.status === 'ABANDONED');
   const callbackFailed = finishedCalls.filter((c) => c.status === 'CALLBACK_FAILED');
@@ -109,22 +116,9 @@ const fetchDashboardData = async () => {
 
   const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0);
 
-  const allTodayCalls = [...todayActive, ...finishedCalls];
+  const allDayCalls = [...dayActive, ...finishedCalls];
 
-  const stats = {
-    totalCalls: allTodayCalls.length,
-    totalAnswered: answered.filter((c) => !c.outbound).length + todayActive.filter((c) => c.status === 'ACTIVE').length,
-    totalOutbound: answered.filter((c) => c.outbound).length,
-    totalAbandoned: abandoned.length,
-    totalCallbackFailed: callbackFailed.length,
-    totalCallbacks: allTodayCalls.filter((c) => c.callBackRequested).length,
-    avgQueueTime: avg(queueTimes),
-    longestQueueTime: queueTimes.length ? Math.max(...queueTimes) : 0,
-    avgCallDuration: avg(callDurations),
-    longestCallDuration: callDurations.length ? Math.max(...callDurations) : 0,
-  };
-
-  // Call lists for dropdown views
+  // Build call count by caller number (masked keys for direct frontend lookup)
   const userMap = {};
   for (const u of users) userMap[u.id] = u;
 
@@ -137,6 +131,7 @@ const fetchDashboardData = async () => {
       agentName: agent ? `${agent.nameFirst} ${agent.nameLast}` : '--',
       duration: c.duration,
       queueDuration: c.queueDuration,
+      startTime: c.startTime,
       endTime: c.endTime,
       status: c.status || null,
       outbound: c.outbound || false,
@@ -147,24 +142,84 @@ const fetchDashboardData = async () => {
     };
   };
 
+  const callCountByNumber = {};
+  const callsByNumber = {};
+  for (const call of allDayCalls) {
+    const masked = maskNumber(call.callerNumber);
+    if (!masked) continue;
+    callCountByNumber[masked] = (callCountByNumber[masked] || 0) + 1;
+    if (!callsByNumber[masked]) callsByNumber[masked] = [];
+    callsByNumber[masked].push(call);
+  }
+  // Also count queued/ringing calls (not in allDayCalls)
+  for (const call of activeCalls) {
+    if (call.status === 'QUEUED' || call.status === 'CALLBACK_REQUESTED' || call.status === 'RINGING') {
+      const masked = maskNumber(call.callerNumber);
+      if (!masked) continue;
+      callCountByNumber[masked] = (callCountByNumber[masked] || 0) + 1;
+      if (!callsByNumber[masked]) callsByNumber[masked] = [];
+      callsByNumber[masked].push(call);
+    }
+  }
+
+  const repeatCallers = Object.entries(callCountByNumber)
+    .filter(([, count]) => count > 1)
+    .map(([maskedNumber, count]) => {
+      const calls = callsByNumber[maskedNumber];
+      const sorted = [...calls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+      return {
+        callerNumber: maskedNumber,
+        companyName: sorted[0].companyName || '--',
+        callerName: sorted[0].callerName || '--',
+        count,
+        calls: sorted.map(mapCall),
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  const stats = {
+    totalCalls: allDayCalls.length,
+    totalAnswered: answered.filter((c) => !c.outbound).length + dayActive.filter((c) => c.status === 'ACTIVE').length,
+    totalOutbound: answered.filter((c) => c.outbound).length,
+    totalAbandoned: abandoned.length,
+    totalCallbackFailed: callbackFailed.length,
+    totalCallbacks: allDayCalls.filter((c) => c.callBackRequested).length,
+    avgQueueTime: avg(queueTimes),
+    longestQueueTime: queueTimes.length ? Math.max(...queueTimes) : 0,
+    avgCallDuration: avg(callDurations),
+    longestCallDuration: callDurations.length ? Math.max(...callDurations) : 0,
+  };
+
+  // Call lists for dropdown views
   const callLists = {
-    allCalls: [...allTodayCalls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).map(mapCall),
+    allCalls: [...allDayCalls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).map(mapCall),
     recentCalls: [...answered].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).slice(0, 5).map(mapCall),
     longestCalls: [...answered].sort((a, b) => (b.duration || 0) - (a.duration || 0)).slice(0, 5).map(mapCall),
     longestQueue: [...finishedCalls].sort((a, b) => (b.queueDuration || 0) - (a.queueDuration || 0)).slice(0, 5).map(mapCall),
-    abandonedCalls: [...abandoned].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).slice(0, 5).map(mapCall),
+    abandonedCalls: [...abandoned].sort((a, b) => new Date(b.endTime) - new Date(a.endTime)).map(mapCall),
   };
 
-  return { agents, queue, stats, callLists };
+  return { agents, queue, stats, callLists, callCountByNumber, repeatCallers };
 };
 
 const getData = async (req, res) => {
   try {
     const data = await fetchDashboardData();
-    if (!req.session?.user?.supervisor) {
-      delete data.stats;
-      delete data.callLists;
+    const config = await getVisibilityConfig();
+    const user = req.session?.user;
+
+    if (!canAccess(config.stats, user)) delete data.stats;
+    if (!canAccess(config.callLists, user)) delete data.callLists;
+    if (!canAccess(config.callCountByNumber, user)) delete data.callCountByNumber;
+    if (!canAccess(config.repeatCallers, user)) delete data.repeatCallers;
+    if (!canAccess(config.agentMetrics, user)) {
+      for (const agent of data.agents) {
+        delete agent.callsAnswered;
+        delete agent.outboundCalls;
+        delete agent.lastLogin;
+      }
     }
+
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch dashboard data' });
@@ -201,8 +256,26 @@ const removeQueueCall = async (req, res) => {
   }
 };
 
+const getStats = async (req, res) => {
+  try {
+    const config = await getVisibilityConfig();
+    if (!canAccess(config.stats, req.session?.user)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const date = req.query.date ? new Date(req.query.date + 'T00:00:00') : new Date();
+    if (isNaN(date.getTime())) {
+      return res.status(400).json({ error: 'Invalid date' });
+    }
+    const data = await fetchDashboardData(date);
+    res.json({ stats: data.stats, callLists: data.callLists, callCountByNumber: data.callCountByNumber, repeatCallers: data.repeatCallers });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch stats data' });
+  }
+};
+
 module.exports = {
   getData,
+  getStats,
   fetchDashboardData,
   removeQueueCall,
 };

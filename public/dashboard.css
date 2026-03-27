@@ -49,16 +49,11 @@ body { background: #e8eaed; margin: 0; }
 .sort-th:hover { background: rgba(0,0,0,0.04); }
 .sort-th.sort-active { color: #4f46e5; }
 
-/* Call list search */
-.call-list-search { font-size: 0.85rem; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 10px; font-family: inherit; background: #fff; color: #111827; min-width: 180px; }
-.call-list-search:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
 
 /* Column picker */
-.col-picker-wrap { position: relative; }
 .col-picker-btn { background: transparent; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer; color: #374151; font-family: inherit; }
 .col-picker-btn:hover { background: #f3f4f6; }
-.col-picker-panel { display: none; position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 180px; padding: 4px 0; }
-.col-picker-panel.open { display: block; }
+.col-picker-panel { min-width: 180px; padding: 4px 0; }
 .col-picker-item { display: flex; align-items: center; padding: 5px 12px; cursor: grab; user-select: none; gap: 8px; }
 .col-picker-item:hover { background: #f9fafb; }
 .col-picker-item.drag-over { background: #dbeafe; }
@@ -70,7 +65,7 @@ body { background: #e8eaed; margin: 0; }
 .col-picker-footer button:hover { color: #111; text-decoration: underline; }
 body.dark .col-picker-btn { border-color: #2a3f55; color: #e0e8f0; }
 body.dark .col-picker-btn:hover { background: #1a2d42; }
-body.dark .col-picker-panel { background: #1a2d42; border-color: #2a3f55; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+body.dark .col-picker-panel.dropdown-menu { background: #1a2d42; border-color: #2a3f55; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
 body.dark .col-picker-item:hover { background: #0e1e2f; }
 body.dark .col-picker-item.drag-over { background: #1e3a5f; }
 body.dark .col-picker-handle { color: #4a5568; }
@@ -92,6 +87,8 @@ body.dark .table { color: #f0f2f3; --bs-table-bg: transparent; --bs-table-color:
 body.dark .table thead th { color: #787676; border-color: #1a2d42; }
 body.dark .table td { border-color: #1a2d42; color: #f0f2f3; }
 body.dark select, body.dark option { background: #132133; color: #f0f2f3; }
+body.dark .form-control { background-color: #1f2937; border-color: #374151; color: #f9fafb; }
+body.dark .form-control:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
 body.dark .empty { color: #787676; }
 body.dark .status-available { background: #0a3d2a; color: #3adb76; }
 body.dark .status-engaged, body.dark .status-outbound { background: #1e3a5f; color: #60a5fa; }
@@ -118,8 +115,6 @@ body.dark .stat-card.stat-callback .stat-value { color: #ffae00; }
 body.dark .call-list-select { color: #fff; }
 body.dark .sort-th:hover { background: rgba(255,255,255,0.06); }
 body.dark .sort-th.sort-active { color: #818cf8; }
-body.dark .call-list-search { background: #1f2937; border-color: #374151; color: #f9fafb; }
-body.dark .call-list-search:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
 body.dark .theme-toggle { background: #1779ba; }
 body.dark .theme-toggle .knob { transform: translateX(22px); }
 
@@ -184,17 +179,7 @@ body.dark .ms-nav .theme-toggle { background: rgba(255,255,255,0.2); }
 body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 
 /* ── Dropdown panels ── */
-.ms-panel {
-  position: fixed;
-  top: 48px;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-  z-index: 999;
-  display: none;
-}
-.ms-panel.open { display: block; }
+.ms-app-panel, .ms-profile-panel { border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
 
 .ms-panel-title {
   font-size: 0.8rem;
@@ -207,7 +192,6 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 
 /* App launcher panel */
 .ms-app-panel {
-  left: 8px;
   width: 360px;
   padding-bottom: 14px;
   max-height: calc(100vh - 60px);
@@ -256,7 +240,7 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 .ms-app-tile span { font-size: 0.85rem; text-align: left; line-height: 1.2; }
 
 /* Profile panel */
-.ms-profile-panel { right: 8px; width: 320px; overflow: hidden; }
+.ms-profile-panel { width: 320px; overflow: hidden; }
 
 .ms-profile-topbar {
   display: flex;
@@ -350,7 +334,7 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 }
 
 /* ── Dark mode: panels ── */
-body.dark .ms-panel { background: #1a2d42; border-color: #2a3f55; }
+body.dark .ms-app-panel, body.dark .ms-profile-panel { background: #1a2d42; border-color: #2a3f55; }
 body.dark .ms-panel-title { color: #8899aa; }
 
 body.dark .ms-app-panel-heading { color: #f0f2f3; }
@@ -369,3 +353,31 @@ body.dark .ms-panel-divider { background: #2a3f55; }
 body.dark .ms-switch-account-row { background: #132133; color: #e0e8f0; }
 body.dark .ms-switch-account-row:hover { background: #0e1e2f; color: #e0e8f0; }
 body.dark .ms-switch-icon-wrap { background: #2a3f55; color: #8899aa; }
+
+
+/* Collapse chevron */
+.collapse-chevron { font-size: 0.7rem; color: #6b7280; transition: transform 0.15s; }
+body.dark .collapse-chevron { color: #8899aa; }
+
+/* Repeat caller badge */
+.repeat-caller-badge { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; }
+body.dark .repeat-caller-badge { background: #3d2e08; color: #ffae00; }
+
+/* Repeat caller detail button */
+.repeat-caller-detail-btn { font-size: 0.75rem; }
+
+/* Dark mode: modal */
+body.dark .modal-content { background: #132133; }
+body.dark .modal-header { border-bottom-color: #2a3f55; }
+body.dark .modal-footer { border-top-color: #2a3f55; }
+body.dark .btn-close { filter: invert(1); }
+
+/* Settings panel */
+.settings-feature-row { padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+.settings-feature-row:last-child { border-bottom: none; }
+.settings-feature-label { font-weight: 600; margin-bottom: 6px; }
+.settings-visibility-select { max-width: 220px; }
+.settings-approved-users { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.settings-user-check { font-size: 0.875rem; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.settings-feedback { font-size: 0.85rem; }
+body.dark .settings-feature-row { border-bottom-color: #2a3f55; }
