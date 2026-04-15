@@ -122,6 +122,24 @@ const fetchDashboardData = async (date) => {
   const userMap = {};
   for (const u of users) userMap[u.id] = u;
 
+  // Fetch case Subjects from Salesforce for all calls that have a caseId
+  const subjectMap = {};
+  try {
+    const allCallsForSubjects = [...activeCalls, ...finishedCalls];
+    const caseIds = [...new Set(allCallsForSubjects.map((c) => c.salesforceCaseId).filter(Boolean))];
+    if (caseIds.length > 0) {
+      await sfdcConn.authorize({ grant_type: 'client_credentials' });
+      const idList = caseIds.map((id) => `'${id}'`).join(',');
+      const result = await sfdcConn.query(`SELECT Id, Subject FROM Case WHERE Id IN (${idList})`);
+      for (const r of result.records || []) {
+        subjectMap[r.Id] = r.Subject;
+      }
+    }
+  } catch (err) {
+    // Non-fatal: dashboard still works without subjects
+    console.error('Failed to fetch case subjects:', err.message);
+  }
+
   const mapCall = (c) => {
     const agent = userMap[c.userId];
     return {
@@ -138,6 +156,7 @@ const fetchDashboardData = async (date) => {
       callbackRequested: c.callBackRequested || false,
       salesforceCaseId: c.salesforceCaseId || null,
       salesforceCaseNumber: c.salesforceCaseNumber || null,
+      caseSubject: subjectMap[c.salesforceCaseId] || null,
       callLink: c.callLink || null,
     };
   };

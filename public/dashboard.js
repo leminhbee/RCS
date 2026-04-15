@@ -20,7 +20,7 @@ async function fetchStatsForDate(dateStr) {
 }
 
 // -- Call list column config --
-const DEFAULT_COLS = ['startTime', 'callerName', 'callerNumber', 'type', 'companyName', 'agentName', 'duration', 'queueDuration', 'endTime', 'sfCase'];
+const DEFAULT_COLS = ['startTime', 'callerName', 'callerNumber', 'type', 'companyName', 'agentName', 'duration', 'queueDuration', 'endTime', 'sfCase', 'caseSubject'];
 const callType = (c) => {
   if (c.status === 'ABANDONED') return 'Abandoned';
   if (c.status === 'CALLBACK_FAILED') return 'CB Failed';
@@ -43,6 +43,7 @@ const CALL_COLUMNS = {
   queueDuration: { label: 'Queue Wait',    sortVal: c => c.queueDuration || 0,                        render: c => formatSeconds(c.queueDuration) },
   endTime:       { label: 'Ended',         sortVal: c => c.endTime ? new Date(c.endTime).getTime() : 0, render: c => formatTimeAgo(c.endTime) },
   sfCase:        { label: 'SF Case',       sortVal: c => c.salesforceCaseNumber || '',                render: c => c.salesforceCaseId && c.salesforceCaseNumber ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${c.salesforceCaseId}/view" target="_blank" rel="noopener">${c.salesforceCaseNumber}</a>` : '--' },
+  caseSubject:   { label: 'Subject',       sortVal: c => c.caseSubject || '',                         render: c => c.caseSubject || '--' },
 };
 let colOrder = [...DEFAULT_COLS];
 let colHidden = new Set();
@@ -525,6 +526,10 @@ async function init() {
     if (isSuperAdmin) {
       document.getElementById('settings-btn').style.display = '';
       initSettingsPanel();
+    }
+    // Reports link for supervisors and superAdmins
+    if (user?.supervisor || isSuperAdmin) {
+      document.getElementById('reports-nav-link').style.display = '';
     }
 
     // Build stats container based on permissions

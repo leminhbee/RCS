@@ -1,10 +1,15 @@
 const router = require('express').Router();
 const dashboardController = require('../controllers/dashboard');
+const reportsController = require('../controllers/reports');
 const atp = require('../ATP');
 const { getVisibilityConfig, getPermissions, FEATURES } = require('../helpers/dashboardAccess');
 
 router.get('/api', dashboardController.getData);
 router.get('/api/stats', dashboardController.getStats);
+router.get('/api/reports', (req, res, next) => {
+  if (!req.session?.user?.superAdmin && !req.session?.user?.supervisor) return res.status(403).json({ error: 'Forbidden' });
+  next();
+}, reportsController.getReports);
 
 router.get('/api/me', async (req, res) => {
   try {

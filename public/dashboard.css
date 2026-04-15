@@ -140,6 +140,16 @@ body.dark .theme-toggle .knob { transform: translateX(22px); }
   white-space: nowrap;
 }
 
+.ms-nav-link {
+  color: rgba(255,255,255,0.85);
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.ms-nav-link:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
 .ms-icon-btn {
   background: transparent;
   border: none;
