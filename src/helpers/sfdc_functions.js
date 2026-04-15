@@ -55,7 +55,8 @@ const createCase = async (tech, body) => {
   if (createdCase.errors.length > 0) {
     throw createdCase.errors[0];
   }
-  return createdCase;
+  const caseRecord = await sfdcConn.sobject('Case').retrieve(createdCase.id, ['CaseNumber']);
+  return { id: createdCase.id, CaseNumber: caseRecord.CaseNumber };
 };
 
 const createUnassignedCase = async (tech, callerNumber) => {
@@ -77,7 +78,8 @@ const createUnassignedCase = async (tech, callerNumber) => {
   if (createdCase.errors.length > 0) {
     throw createdCase.errors[0];
   }
-  return createdCase;
+  const caseRecord = await sfdcConn.sobject('Case').retrieve(createdCase.id, ['CaseNumber']);
+  return { id: createdCase.id, CaseNumber: caseRecord.CaseNumber };
 };
 
 module.exports = {

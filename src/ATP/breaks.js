@@ -1,11 +1,10 @@
-const axios = require('axios');
+const axios = require('./client');
 const { createLogger } = require('../helpers/logger');
 const logger = createLogger();
-const atp_url = process.env.ATP_URL;
 
 async function create(gotoId, startTime) {
   try {
-    const response = await axios.post(`${atp_url}/breaks`, {
+    const response = await axios.post(`/breaks`, {
       gotoId: gotoId,
       startTime: startTime,
     });
@@ -18,7 +17,7 @@ async function create(gotoId, startTime) {
 
 async function fetchOne(breakId) {
   try {
-    const response = await axios.get(`${atp_url}/breaks/${breakId}`);
+    const response = await axios.get(`/breaks/${breakId}`);
     return response.data;
   } catch (error) {
     logger.error({ error }, 'Error while fetching breakId: ' + breakId);
@@ -28,7 +27,7 @@ async function fetchOne(breakId) {
 
 async function update(breakId, data) {
   try {
-    return await axios.patch(`${atp_url}/breaks/${breakId}`, data);
+    return await axios.patch(`/breaks/${breakId}`, data);
   } catch (error) {
     logger.error({ error }, 'Error updating break record: ' + breakId);
     throw new Error('Error updating break record: ' + breakId);

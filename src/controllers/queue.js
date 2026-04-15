@@ -139,10 +139,15 @@ const remove = async (req) => {
           })
         );
 
-        // Update call record to ABANDONED
+        // Update call record to ABANDONED with queue duration
+        const endTime = new Date();
+        const queueDuration = callRecord.startTime
+          ? Math.round((endTime - new Date(callRecord.startTime)) / 1000)
+          : null;
         await atp.calls.update(callRecord.id, {
           status: 'ABANDONED',
-          endTime: new Date(),
+          endTime,
+          queueDuration,
         });
 
         logger.info(
@@ -168,8 +173,26 @@ const remove = async (req) => {
           })
         );
       }
+    } else if (body.call_result === 'DEFLECTED' && callRecord) {
+      // DEFLECTED = caller completed callback IVR, update record to CALLBACK_REQUESTED
+      await atp.calls.update(callRecord.id, {
+        status: 'CALLBACK_REQUESTED',
+        callBackRequested: true,
+      });
+
+      logger.info(
+        createQueueLog({
+          operation: 'remove',
+          subOperation: 'CALLBACK_REQUESTED',
+          callerNumber,
+          messageId,
+          callId: body.call_id,
+          callRecordId: callRecord.id,
+          data: { reason: body.call_result, message: 'Call record updated to CALLBACK_REQUESTED (deflected)' },
+        })
+      );
     } else {
-      // Not abandoned (DEFLECTED, CONNECTED, etc), just log
+      // CONNECTED or other non-abandoned results, just log
       logger.info(
         createQueueLog({
           operation: 'remove',
@@ -197,12 +220,10 @@ const remove = async (req) => {
 };
 
 const callback = async (req) => {
-  const { messageId, body, logger, callRecord } = req;
+  const { messageId, body, logger } = req;
   const callerNumber = body.caller_number;
 
   try {
-    // Note: Do NOT remove from AVA queue - callback requests stay in queue
-
     logger.info(
       createQueueLog({
         operation: 'callback',
@@ -215,37 +236,7 @@ const callback = async (req) => {
         },
       })
     );
-
-    // Update call record status to CALLBACK_REQUESTED
-    if (callRecord) {
-      await atp.calls.update(callRecord.id, {
-        status: 'CALLBACK_REQUESTED',
-        callBackRequested: true,
-      });
-
-      logger.info(
-        createQueueLog({
-          operation: 'callback',
-          subOperation: 'CALLBACK_REQUESTED',
-          callerNumber,
-          messageId,
-          callId: body.call_id,
-          callRecordId: callRecord.id,
-          data: { message: 'Call record updated to CALLBACK_REQUESTED' },
-        })
-      );
-    } else {
-      logger.warn(
-        createQueueLog({
-          operation: 'callback',
-          subOperation: 'NO_CALL_RECORD',
-          callerNumber,
-          messageId,
-          callId: body.call_id,
-          data: { message: 'No call record found to update' },
-        })
-      );
-    }
+    // Status update now happens in remove() when call_result is DEFLECTED
   } catch (error) {
     logger.error({
       ...createQueueLog({
