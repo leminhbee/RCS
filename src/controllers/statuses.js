@@ -104,8 +104,12 @@ const handleRequest = async (req, res) => {
       return;
     }
 
-    // While in OUTBOUND, ignore all status changes except AVAILABLE
-    if (user.currentStatus === 'OUTBOUND' && body.event_aux_type !== 'AVAILABLE') {
+    // While in OUTBOUND, ignore RC's automatic call-state transitions
+    // (so the OUTBOUND badge stays put during the call), but let manual
+    // aux-state changes through so agents can exit OUTBOUND directly to
+    // ON-BREAK, LUNCH, etc. without getting stuck.
+    const AUTO_TRANSITIONS_DURING_OUTBOUND = new Set(['ENGAGED', 'WRAP-UP', 'RINGING']);
+    if (user.currentStatus === 'OUTBOUND' && AUTO_TRANSITIONS_DURING_OUTBOUND.has(body.event_aux_type)) {
       return;
     }
 

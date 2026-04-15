@@ -3,6 +3,7 @@ const dashboardController = require('../controllers/dashboard');
 
 router.get('/api', dashboardController.getData);
 router.delete('/api/queue/:id', dashboardController.removeQueueCall);
+router.delete('/api/call/:id', dashboardController.clearAgentCall);
 
 
 module.exports = router;

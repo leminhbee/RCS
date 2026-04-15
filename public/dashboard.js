@@ -60,6 +60,13 @@ function renderAgents() {
       const secs = Math.floor((Date.now() - new Date(agent.statusSince)) / 1000);
       if (secs >= 1800) stClass = 'status-on-call-long';
     }
+    const callDurationCell = agent.activeCall
+      ? `${formatDuration(agent.activeCall.startTime)}${
+          agent.activeCall.status === 'ACTIVE'
+            ? ` <button class="agent-call-clear-btn" data-id="${agent.activeCall.id}" title="Clear stuck call">&times;</button>`
+            : ''
+        }`
+      : '';
     html += `<tr>
       <td>${agent.name}${sup}</td>
       <td><span class="status ${stClass}">${agent.status || '--'}</span></td>
@@ -70,7 +77,7 @@ function renderAgents() {
       <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
       <td>${agent.activeCall?.callerName || ''}</td>
       <td>${agent.activeCall?.companyName || ''}</td>
-      <td class="duration">${agent.activeCall ? formatDuration(agent.activeCall.startTime) : ''}</td>
+      <td class="duration">${callDurationCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -83,6 +90,19 @@ function renderAgents() {
       renderAgents();
     });
   }
+
+  container.querySelectorAll('.agent-call-clear-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Clear this stuck call from the agent? It will be marked COMPLETE.')) return;
+      btn.disabled = true;
+      try {
+        const basePath = location.pathname.replace(/\/$/, '');
+        await fetch(`${basePath}/api/call/${btn.dataset.id}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error('Failed to clear call:', e);
+      }
+    });
+  });
 }
 
 function renderQueue() {
