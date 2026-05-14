@@ -4,6 +4,7 @@ let agentSortDir = 'desc';
 let volumeChart = null;
 let agentCallsChart = null;
 let agentTimeChart = null;
+let agentLongChart = null;
 
 // -- Theme toggle --
 const toggle = document.getElementById('theme-toggle');
@@ -190,20 +191,54 @@ function renderVolumeChart(daily) {
 }
 
 // -- Render: Duration / Responsiveness --
-function renderDuration(data) {
+function renderDuration(data, teamData) {
+  const isFiltered = !!document.getElementById('team-member-select').value;
+  const t = teamData || {};
   const cards = [
-    { value: formatSeconds(data.avgCallDuration), label: 'Avg Call Length', cls: '' },
-    { value: formatSeconds(data.longestCallDuration), label: 'Longest Call', cls: '' },
-    { value: formatSeconds(data.avgQueueTime), label: 'Avg Speed of Answer', cls: '' },
-    { value: formatSeconds(data.longestQueueTime), label: 'Avg Queue Time', cls: '' },
+    { value: formatSeconds(data.avgCallDuration), team: formatSeconds(t.avgCallDuration), label: 'Avg Call Length', cls: '' },
+    { value: formatSeconds(data.longestCallDuration), team: formatSeconds(t.longestCallDuration), label: 'Longest Call', cls: '' },
+    { value: data.longCalls || 0, team: (t.longCalls || 0).toFixed(1), label: '30 Min+ Calls', cls: '' },
+    { value: formatSeconds(data.avgQueueTime), team: formatSeconds(t.avgQueueTime), label: 'Avg Speed of Answer', cls: '' },
+    { value: formatSeconds(data.longestQueueTime), team: formatSeconds(t.longestQueueTime), label: 'Avg Queue Time', cls: '' },
   ];
 
   document.getElementById('duration-stats').innerHTML = cards.map((c) => `
-    <div class="col-md-3 col-6"><div class="card stat-card ${c.cls} p-2">
+    <div class="col"><div class="card stat-card ${c.cls} p-2">
       <div class="stat-value">${c.value}</div>
       <div class="stat-label">${c.label}</div>
+      ${isFiltered ? `<div class="stat-team-avg">team avg: ${c.team}</div>` : ''}
     </div></div>
   `).join('');
+}
+
+// -- Render: Flagged Records --
+function renderFlaggedCalls(flagged) {
+  const card = document.getElementById('flagged-calls-card');
+  const container = document.getElementById('flagged-calls-table');
+  const countEl = document.getElementById('flagged-calls-count');
+  if (!flagged || flagged.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  countEl.textContent = flagged.length;
+
+  let html = `<table class="table table-striped table-hover table-sm mb-0">
+    <thead><tr>
+      <th>Agent</th><th>Started</th><th>Duration</th><th>Caller</th><th>Call ID</th>
+    </tr></thead><tbody>`;
+  for (const c of flagged) {
+    const started = c.startTime ? new Date(c.startTime).toLocaleString() : '--';
+    html += `<tr>
+      <td>${c.agentName}</td>
+      <td>${started}</td>
+      <td>${formatSeconds(c.duration)}</td>
+      <td>${c.callerNumber || '--'}</td>
+      <td><code class="small">${c.id || '--'}</code></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
 
 // -- Render: Agent Activity --
@@ -212,6 +247,7 @@ const AGENT_COLUMNS = {
   callsHandled:    { label: 'Calls Handled',    sortVal: (a) => a.callsHandled },
   totalTalkTime:   { label: 'Total Talk Time',  sortVal: (a) => a.totalTalkTime },
   avgCallDuration: { label: 'Avg Call Length',   sortVal: (a) => a.avgCallDuration },
+  longCalls:       { label: '30 Min+ Calls',    sortVal: (a) => a.longCalls || 0 },
 };
 
 function renderAgentActivity(agents) {
@@ -246,6 +282,7 @@ function renderAgentActivity(agents) {
       <td class="text-center">${agent.callsHandled}</td>
       <td class="text-center">${formatSeconds(agent.totalTalkTime)}</td>
       <td class="text-center">${formatSeconds(agent.avgCallDuration)}</td>
+      <td class="text-center">${agent.longCalls || 0}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -290,9 +327,11 @@ function agentColor(index) {
 function renderAgentChart() {
   if (agentCallsChart) { agentCallsChart.destroy(); agentCallsChart = null; }
   if (agentTimeChart) { agentTimeChart.destroy(); agentTimeChart = null; }
+  if (agentLongChart) { agentLongChart.destroy(); agentLongChart = null; }
   const callsCtx = freshCanvas('agent-calls-chart');
   const timeCtx = freshCanvas('agent-time-chart');
-  if (!callsCtx || !timeCtx) return;
+  const longCtx = freshCanvas('agent-long-chart');
+  if (!callsCtx || !timeCtx || !longCtx) return;
 
   const agents = reportData?.agentActivity;
   const agentDailyData = reportData?.agentDaily;
@@ -326,6 +365,11 @@ function renderAgentChart() {
       data: { labels, datasets: [{ label: 'Talk Time (min)', data: sorted.map((a) => Math.round(a.totalTalkTime / 60)), backgroundColor: colors }] },
       options: { ...doughnutOpts, plugins: { ...doughnutOpts.plugins, title: { display: true, text: 'Talk Time (min)', color: tickColor } } },
     });
+    agentLongChart = new Chart(longCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ label: '30 Min+ Calls', data: sorted.map((a) => a.longCalls || 0), backgroundColor: colors }] },
+      options: { ...doughnutOpts, plugins: { ...doughnutOpts.plugins, title: { display: true, text: '30 Min+ Calls', color: tickColor } } },
+    });
     return;
   }
 
@@ -336,7 +380,6 @@ function renderAgentChart() {
     const weekdayIndices = [];
     const weekdayDates = allDates.filter((d, i) => { if (isWeekday(d)) { weekdayIndices.push(i); return true; } return false; });
     const dateLabels = weekdayDates.map((d) => formatDate(d));
-    const agentCount = agentDailyData.length;
 
     const callsDatasets = agentDailyData.map((agent, i) => ({
       label: agent.agentName,
@@ -352,19 +395,23 @@ function renderAgentChart() {
       backgroundColor: agentColor(i),
       borderWidth: 2, tension: 0.3, pointRadius: 3, fill: false,
     }));
+    const longDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].longCalls || 0),
+      borderColor: agentColor(i),
+      backgroundColor: agentColor(i),
+      borderWidth: 2, tension: 0.3, pointRadius: 3, fill: false,
+    }));
 
-    // Team average per day (weekdays only)
-    const avgCalls = weekdayIndices.map((di) => {
-      const sum = agentDailyData.reduce((s, a) => s + a.daily[di].calls, 0);
-      return Math.round((sum / agentCount) * 10) / 10;
-    });
-    const avgTime = weekdayIndices.map((di) => {
-      const sum = agentDailyData.reduce((s, a) => s + a.daily[di].talkTime, 0);
-      return Math.round(sum / agentCount / 60 * 10) / 10;
-    });
+    // Team average per day (weekdays only) — always team-wide, regardless of user filter
+    const teamAvgDaily = reportData?.teamAvgDaily || [];
+    const avgCalls = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.calls || 0) * 10) / 10);
+    const avgTime = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.talkTime || 0) / 60 * 10) / 10);
+    const avgLong = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.longCalls || 0) * 10) / 10);
 
     callsDatasets.push({ label: 'Team Avg', data: avgCalls, ...avgLineStyle });
     timeDatasets.push({ label: 'Team Avg', data: avgTime, ...avgLineStyle });
+    longDatasets.push({ label: 'Team Avg', data: avgLong, ...avgLineStyle });
 
     const lineOpts = (title, yLabel) => ({
       responsive: true, maintainAspectRatio: false,
@@ -377,6 +424,7 @@ function renderAgentChart() {
 
     agentCallsChart = new Chart(callsCtx, { type: 'line', data: { labels: dateLabels, datasets: callsDatasets }, options: lineOpts('Calls Handled', 'Calls') });
     agentTimeChart = new Chart(timeCtx, { type: 'line', data: { labels: dateLabels, datasets: timeDatasets }, options: lineOpts('Talk Time', 'Minutes') });
+    agentLongChart = new Chart(longCtx, { type: 'line', data: { labels: dateLabels, datasets: longDatasets }, options: lineOpts('30 Min+ Calls', 'Calls') });
     return;
   }
 
@@ -387,7 +435,6 @@ function renderAgentChart() {
     const weekdayIndices = [];
     const weekdayDates = allDates.filter((d, i) => { if (isWeekday(d)) { weekdayIndices.push(i); return true; } return false; });
     const dateLabels = weekdayDates.map((d) => formatDate(d));
-    const agentCount = agentDailyData.length;
 
     const callsDatasets = agentDailyData.map((agent, i) => ({
       label: agent.agentName,
@@ -401,19 +448,22 @@ function renderAgentChart() {
       backgroundColor: agentColor(i),
       borderRadius: 2,
     }));
+    const longDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].longCalls || 0),
+      backgroundColor: agentColor(i),
+      borderRadius: 2,
+    }));
 
-    // Team average per day
-    const avgCalls = weekdayIndices.map((di) => {
-      const sum = agentDailyData.reduce((s, a) => s + a.daily[di].calls, 0);
-      return Math.round((sum / agentCount) * 10) / 10;
-    });
-    const avgTime = weekdayIndices.map((di) => {
-      const sum = agentDailyData.reduce((s, a) => s + a.daily[di].talkTime, 0);
-      return Math.round(sum / agentCount / 60 * 10) / 10;
-    });
+    // Team average per day — always team-wide, regardless of user filter
+    const teamAvgDaily = reportData?.teamAvgDaily || [];
+    const avgCalls = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.calls || 0) * 10) / 10);
+    const avgTime = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.talkTime || 0) / 60 * 10) / 10);
+    const avgLong = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.longCalls || 0) * 10) / 10);
 
     callsDatasets.push({ label: 'Team Avg', type: 'line', data: avgCalls, ...avgLineStyle });
     timeDatasets.push({ label: 'Team Avg', type: 'line', data: avgTime, ...avgLineStyle });
+    longDatasets.push({ label: 'Team Avg', type: 'line', data: avgLong, ...avgLineStyle });
 
     const stackedOpts = (title, yLabel) => ({
       responsive: true, maintainAspectRatio: false,
@@ -426,13 +476,16 @@ function renderAgentChart() {
 
     agentCallsChart = new Chart(callsCtx, { type: 'bar', data: { labels: dateLabels, datasets: callsDatasets }, options: stackedOpts('Calls Handled', 'Calls') });
     agentTimeChart = new Chart(timeCtx, { type: 'bar', data: { labels: dateLabels, datasets: timeDatasets }, options: stackedOpts('Talk Time', 'Minutes') });
+    agentLongChart = new Chart(longCtx, { type: 'bar', data: { labels: dateLabels, datasets: longDatasets }, options: stackedOpts('30 Min+ Calls', 'Calls') });
     return;
   }
 
-  // Bar chart: agents on x-axis with average line
+  // Bar chart: agents on x-axis with average line — always team-wide
   const labels = sorted.map((a) => a.agentName);
-  const avgCalls = Math.round(sorted.reduce((s, a) => s + a.callsHandled, 0) / count * 10) / 10;
-  const avgTime = Math.round(sorted.reduce((s, a) => s + a.totalTalkTime, 0) / count / 60 * 10) / 10;
+  const teamOverall = reportData?.teamAvgOverall || { calls: 0, talkTime: 0, longCalls: 0 };
+  const avgCalls = Math.round(teamOverall.calls * 10) / 10;
+  const avgTime = Math.round(teamOverall.talkTime / 60 * 10) / 10;
+  const avgLong = Math.round((teamOverall.longCalls || 0) * 10) / 10;
 
   const barOpts = (title, yLabel) => ({
     responsive: true, maintainAspectRatio: false,
@@ -458,6 +511,14 @@ function renderAgentChart() {
       { label: `Avg (${avgTime})`, type: 'line', data: Array(count).fill(avgTime), ...avgLineStyle },
     ] },
     options: barOpts('Talk Time', 'Minutes'),
+  });
+  agentLongChart = new Chart(longCtx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: '30 Min+ Calls', data: sorted.map((a) => a.longCalls || 0), backgroundColor: sorted.map((_, i) => agentColor(i)), borderRadius: 3 },
+      { label: `Avg (${avgLong})`, type: 'line', data: Array(count).fill(avgLong), ...avgLineStyle },
+    ] },
+    options: barOpts('30 Min+ Calls', 'Calls'),
   });
 }
 
@@ -640,16 +701,16 @@ function exportCSV() {
 
   // Duration
   row('DURATION / RESPONSIVENESS');
-  row('Avg Call Length', 'Longest Call', 'Avg Speed of Answer', 'Avg Queue Time');
+  row('Avg Call Length', 'Longest Call', '30 Min+ Calls', 'Avg Speed of Answer', 'Avg Queue Time');
   const dur = reportData.duration;
-  row(formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime));
+  row(formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), dur.longCalls || 0, formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime));
   blank();
 
   // Agent Activity
   row('AGENT ACTIVITY');
-  row('Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length');
+  row('Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls');
   for (const a of reportData.agentActivity) {
-    row(a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration));
+    row(a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0);
   }
   blank();
 
@@ -739,8 +800,8 @@ function exportPDF() {
   const dur = reportData.duration;
   doc.autoTable({
     ...tableOpts, startY: yPos,
-    head: [['Avg Call Length', 'Longest Call', 'Avg Speed of Answer', 'Avg Queue Time']],
-    body: [[formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime)]],
+    head: [['Avg Call Length', 'Longest Call', '30 Min+ Calls', 'Avg Speed of Answer', 'Avg Queue Time']],
+    body: [[formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), dur.longCalls || 0, formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime)]],
   });
   yPos = doc.lastAutoTable.finalY + 8;
 
@@ -748,8 +809,8 @@ function exportPDF() {
   sectionHeading('Agent Activity');
   doc.autoTable({
     ...tableOpts, startY: yPos,
-    head: [['Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length']],
-    body: reportData.agentActivity.map((a) => [a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration)]),
+    head: [['Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls']],
+    body: reportData.agentActivity.map((a) => [a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0]),
   });
   yPos = doc.lastAutoTable.finalY + 8;
 
@@ -777,9 +838,12 @@ function exportPDF() {
 }
 
 // -- Team member dropdown --
+let pendingUserId = '';
+
 function populateTeamDropdown(userList) {
   const select = document.getElementById('team-member-select');
-  const currentVal = select.value;
+  const desiredVal = pendingUserId || select.value;
+  pendingUserId = '';
   // Keep "All Team" option, replace the rest
   select.innerHTML = '<option value="">All Team</option>';
   for (const user of userList) {
@@ -789,8 +853,8 @@ function populateTeamDropdown(userList) {
     select.appendChild(opt);
   }
   // Restore previous selection if still valid
-  if (currentVal && [...select.options].some((o) => o.value === currentVal)) {
-    select.value = currentVal;
+  if (desiredVal && [...select.options].some((o) => o.value === desiredVal)) {
+    select.value = desiredVal;
   }
 }
 
@@ -798,10 +862,11 @@ function populateTeamDropdown(userList) {
 async function generateReport() {
   const startDate = document.getElementById('start-date').value;
   const endDate = document.getElementById('end-date').value;
-  const userId = document.getElementById('team-member-select').value;
+  const userId = document.getElementById('team-member-select').value || pendingUserId;
   if (!startDate || !endDate) return;
 
   document.getElementById('reports-data').style.display = 'none';
+  document.getElementById('reports-error').style.display = 'none';
   document.getElementById('reports-loading').style.display = '';
 
   try {
@@ -811,7 +876,8 @@ async function generateReport() {
       populateTeamDropdown(reportData.userList);
     }
     renderCallVolumes(reportData.callVolumes);
-    renderDuration(reportData.duration);
+    renderDuration(reportData.duration, reportData.teamDuration);
+    renderFlaggedCalls(reportData.flaggedCalls);
     renderAgentActivity(reportData.agentActivity);
     renderCases(reportData.cases);
     // Show container before rendering charts so Chart.js can measure dimensions
@@ -822,8 +888,9 @@ async function generateReport() {
     document.getElementById('export-pdf-btn').disabled = false;
   } catch (err) {
     console.error('Failed to generate report:', err);
-    document.getElementById('reports-data').innerHTML = `<div class="card"><div class="card-body text-center text-danger py-4">${err.message}</div></div>`;
-    document.getElementById('reports-data').style.display = '';
+    const errorEl = document.getElementById('reports-error');
+    errorEl.querySelector('.card-body').textContent = err.message;
+    errorEl.style.display = '';
     document.getElementById('export-csv-btn').disabled = true;
     document.getElementById('export-pdf-btn').disabled = true;
   } finally {
@@ -838,9 +905,16 @@ async function init() {
     const res = await fetch(`${basePath}/api/me`);
     const user = await res.json();
 
-    if (!user?.superAdmin && !user?.supervisor) {
+    if (!user?.permissions?.reports) {
       document.getElementById('access-denied').style.display = '';
       return;
+    }
+
+    // Self-scoped users see only their own data — hide the team-member dropdown
+    // (server enforces the scope regardless, so this is just UI cleanup).
+    const canViewAll = user?.viewScopes?.reports === 'all';
+    if (!canViewAll) {
+      document.getElementById('team-member-select').style.display = 'none';
     }
 
     // Populate profile
@@ -861,17 +935,31 @@ async function init() {
     document.getElementById('start-date').max = todayStr;
     document.getElementById('end-date').max = todayStr;
 
-    // Set default date range (this month) and populate hidden inputs
-    const range = getPresetRange('thisMonth');
-    document.getElementById('start-date').value = range.startDate;
-    document.getElementById('end-date').value = range.endDate;
-
-    // Date range dropdown
+    // Restore saved filters (date range preset, custom dates, team member)
     const dateRangeSelect = document.getElementById('date-range-select');
     const customDateRange = document.getElementById('custom-date-range');
+    const validPresets = [...dateRangeSelect.options].map((o) => o.value);
+    const savedPreset = localStorage.getItem('reports_date_range');
+    const initialPreset = validPresets.includes(savedPreset) ? savedPreset : 'thisMonth';
+    dateRangeSelect.value = initialPreset;
+
+    if (initialPreset === 'custom') {
+      const sd = localStorage.getItem('reports_start_date');
+      const ed = localStorage.getItem('reports_end_date');
+      if (sd) document.getElementById('start-date').value = sd;
+      if (ed) document.getElementById('end-date').value = ed;
+      customDateRange.style.setProperty('display', 'flex', 'important');
+    } else {
+      const range = getPresetRange(initialPreset);
+      document.getElementById('start-date').value = range.startDate;
+      document.getElementById('end-date').value = range.endDate;
+    }
+
+    pendingUserId = localStorage.getItem('reports_user_id') || '';
 
     function applyDateRange() {
       const val = dateRangeSelect.value;
+      localStorage.setItem('reports_date_range', val);
       if (val === 'custom') {
         customDateRange.style.display = '';
         customDateRange.style.setProperty('display', 'flex', 'important');
@@ -889,8 +977,13 @@ async function init() {
     dateRangeSelect.addEventListener('change', applyDateRange);
 
     // Custom date inputs auto-generate
-    document.getElementById('start-date').addEventListener('change', generateReport);
-    document.getElementById('end-date').addEventListener('change', generateReport);
+    const onCustomDateChange = () => {
+      localStorage.setItem('reports_start_date', document.getElementById('start-date').value);
+      localStorage.setItem('reports_end_date', document.getElementById('end-date').value);
+      generateReport();
+    };
+    document.getElementById('start-date').addEventListener('change', onCustomDateChange);
+    document.getElementById('end-date').addEventListener('change', onCustomDateChange);
 
     // Case search
     document.getElementById('case-search').addEventListener('input', (e) => {
@@ -899,7 +992,10 @@ async function init() {
     });
 
     // Team member dropdown
-    document.getElementById('team-member-select').addEventListener('change', generateReport);
+    document.getElementById('team-member-select').addEventListener('change', (e) => {
+      localStorage.setItem('reports_user_id', e.target.value);
+      generateReport();
+    });
 
     // Export buttons
     document.getElementById('export-csv-btn').addEventListener('click', exportCSV);

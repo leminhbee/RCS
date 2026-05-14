@@ -2,26 +2,49 @@ const router = require('express').Router();
 const dashboardController = require('../controllers/dashboard');
 const reportsController = require('../controllers/reports');
 const atp = require('../ATP');
-const { getVisibilityConfig, getPermissions, FEATURES } = require('../helpers/dashboardAccess');
+const {
+  getVisibilityConfig,
+  getPermissions,
+  getViewScopes,
+  canAccess,
+  FEATURES,
+  FEATURE_TIERS,
+} = require('../helpers/dashboardAccess');
+
+const requireSupervisor = (req, res, next) => {
+  if (!req.session?.user?.superAdmin && !req.session?.user?.supervisor) return res.status(403).json({ error: 'Forbidden' });
+  next();
+};
+
+const requireReportsAccess = async (req, res, next) => {
+  try {
+    const config = await getVisibilityConfig();
+    if (!canAccess(config.reports, req.session?.user)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  } catch {
+    return res.status(500).json({ error: 'Failed to verify access' });
+  }
+};
 
 router.get('/api', dashboardController.getData);
 router.get('/api/stats', dashboardController.getStats);
-router.get('/api/reports', (req, res, next) => {
-  if (!req.session?.user?.superAdmin && !req.session?.user?.supervisor) return res.status(403).json({ error: 'Forbidden' });
-  next();
-}, reportsController.getReports);
+router.get('/api/reports', requireReportsAccess, reportsController.getReports);
 
 router.get('/api/me', async (req, res) => {
   try {
     const config = await getVisibilityConfig();
     const permissions = getPermissions(req.session.user, config);
-    res.json({ ...req.session.user, permissions });
+    const viewScopes = getViewScopes(req.session.user, config);
+    res.json({ ...req.session.user, permissions, viewScopes });
   } catch {
-    res.json({ ...req.session.user, permissions: {} });
+    res.json({ ...req.session.user, permissions: {}, viewScopes: {} });
   }
 });
 
-router.delete('/api/queue/:id', dashboardController.removeQueueCall);
+router.delete('/api/queue/:id', requireSupervisor, dashboardController.removeQueueCall);
+router.delete('/api/call/:id', requireSupervisor, dashboardController.clearAgentCall);
 
 // SuperAdmin-only settings endpoints
 router.get('/api/settings/visibility', async (req, res) => {
@@ -30,7 +53,7 @@ router.get('/api/settings/visibility', async (req, res) => {
     const config = await getVisibilityConfig();
     const users = await atp.users.fetchAll({});
     const userList = users.map((u) => ({ id: u.id, name: `${u.nameFirst} ${u.nameLast}`.trim() }));
-    res.json({ config, users: userList });
+    res.json({ config, users: userList, featureTiers: FEATURE_TIERS });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch visibility settings' });
   }
@@ -42,7 +65,8 @@ router.put('/api/settings/visibility', async (req, res) => {
     const newConfig = req.body;
     // Validate structure
     for (const key of FEATURES) {
-      if (!newConfig[key] || !['all', 'supervisors', 'approvedUsers'].includes(newConfig[key].visibility)) {
+      const tiers = FEATURE_TIERS[key] || [];
+      if (!newConfig[key] || !tiers.includes(newConfig[key].visibility)) {
         return res.status(400).json({ error: `Invalid visibility for ${key}` });
       }
       if (!Array.isArray(newConfig[key].approvedUsers)) {

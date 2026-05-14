@@ -122,8 +122,47 @@ const handleRequest = async (req, res) => {
       return;
     }
 
-    // While in OUTBOUND, ignore all status changes except AVAILABLE
-    if (user.currentStatus === 'OUTBOUND' && body.event_aux_type !== 'AVAILABLE') {
+    // RNA-STATE means the agent didn't answer a ringing call.
+    // Clear the userId from any RINGING call assigned to them so the
+    // dashboard stops showing that call next to the agent while RC
+    // re-routes it to the next available agent.
+    if (body.event_aux_type === 'RNA-STATE') {
+      try {
+        const ringingCall = await atp.calls.fetchOne({ status: 'RINGING', userId: user.id });
+        if (ringingCall) {
+          await atp.calls.update(ringingCall.id, { userId: null });
+          logger.info(
+            createStatusLog({
+              operation: 'update',
+              messageId,
+              userId: user.id,
+              status: 'RNA-STATE',
+              data: {
+                message: 'Cleared userId from RINGING call after RNA',
+                callRecordId: ringingCall.id,
+              },
+            })
+          );
+        }
+      } catch (err) {
+        logger.error(
+          createStatusLog({
+            operation: 'update',
+            messageId,
+            userId: user.id,
+            status: 'RNA-STATE',
+            data: { message: 'Failed to clear RINGING call after RNA', error: err.message },
+          })
+        );
+      }
+    }
+
+    // While in OUTBOUND, ignore RC's automatic call-state transitions
+    // (so the OUTBOUND badge stays put during the call), but let manual
+    // aux-state changes through so agents can exit OUTBOUND directly to
+    // ON-BREAK, LUNCH, etc. without getting stuck.
+    const AUTO_TRANSITIONS_DURING_OUTBOUND = new Set(['ENGAGED', 'WRAP-UP', 'RINGING']);
+    if (user.currentStatus === 'OUTBOUND' && AUTO_TRANSITIONS_DURING_OUTBOUND.has(body.event_aux_type)) {
       return;
     }
 
@@ -133,6 +172,51 @@ const handleRequest = async (req, res) => {
       if (user.currentStatus === 'OUTBOUND') {
         // Outbound call ended — fall through to set AVAILABLE normally, no wrap-up
       } else {
+        // Fallback: if RingCentral never delivered /calls/end for this agent's
+        // active call, close it now so it doesn't stay stuck in ACTIVE.
+        try {
+          const stuckCall = await atp.calls.fetchOne({ status: 'ACTIVE', userId: user.id });
+          if (stuckCall) {
+            const endTime = new Date();
+            const duration = stuckCall.startTime
+              ? (endTime - new Date(stuckCall.startTime)) / 1000
+              : null;
+            await atp.calls.update(stuckCall.id, {
+              status: 'COMPLETE',
+              endTime,
+              duration,
+            });
+            logger.warn(
+              createStatusLog({
+                operation: 'update',
+                messageId,
+                userId: user.id,
+                slackId: user.slackId,
+                status: 'AVAILABLE',
+                previousStatus: 'ENGAGED',
+                data: {
+                  message: 'Auto-closed ACTIVE call record — /calls/end webhook missing',
+                  callRecordId: stuckCall.id,
+                  callId: stuckCall.callId,
+                  duration,
+                },
+              })
+            );
+          }
+        } catch (err) {
+          logger.error({
+            ...createStatusLog({
+              operation: 'update',
+              messageId,
+              userId: user.id,
+              status: 'AVAILABLE',
+              previousStatus: 'ENGAGED',
+              data: { message: 'Failed to auto-close ACTIVE call record' },
+            }),
+            ...formatError(err),
+          });
+        }
+
         await startWrapUp(user, logger);
         logger.info(
           createStatusLog({

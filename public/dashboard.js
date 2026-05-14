@@ -1,6 +1,7 @@
 let dashboardData = { agents: [], queue: [], stats: {}, callLists: {} };
 let permissions = {};
 let isSuperAdmin = false;
+let isSupervisor = false;
 let selectedDate = null; // null = today (live mode)
 
 function isToday(dateStr) {
@@ -198,6 +199,14 @@ function renderAgents() {
     }
     const metricsCells = permissions.agentMetrics ? `<td>${formatLoginTime(agent.lastLogin)}</td><td class="text-center">${agent.callsAnswered || 0}</td><td class="text-center">${agent.outboundCalls || 0}</td>` : '';
     const timesCalledCell = permissions.callCountByNumber ? `<td class="text-center">${agent.activeCall ? (() => { const counts = dashboardData.liveCallCountByNumber || dashboardData.callCountByNumber; const cnt = counts?.[agent.activeCall.callerNumber] || 0; return cnt > 1 ? `<span class="repeat-caller-badge">${cnt}</span>` : (cnt || ''); })() : ''}</td>` : '';
+    const canClearCalls = isSupervisor || isSuperAdmin;
+    const callDurationCell = agent.activeCall
+      ? `${formatDuration(agent.activeCall.startTime)}${
+          agent.activeCall.status === 'ACTIVE' && canClearCalls
+            ? ` <button class="agent-call-clear-btn" data-id="${agent.activeCall.id}" title="Clear stuck call">&times;</button>`
+            : ''
+        }`
+      : '';
     html += `<tr>
       <td>${agent.name}${sup}</td>
       <td><span class="status ${stClass}">${agent.status || '--'}</span></td>
@@ -206,7 +215,7 @@ function renderAgents() {
       <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
       <td>${agent.activeCall?.callerName || ''}</td>
       <td>${agent.activeCall?.companyName || ''}</td>
-      <td class="duration">${agent.activeCall ? formatDuration(agent.activeCall.startTime) : ''}</td>
+      <td class="duration">${callDurationCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -219,6 +228,19 @@ function renderAgents() {
       renderAgents();
     });
   }
+
+  container.querySelectorAll('.agent-call-clear-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Clear this stuck call from the agent? It will be marked COMPLETE.')) return;
+      btn.disabled = true;
+      try {
+        const basePath = location.pathname.replace(/\/$/, '');
+        await fetch(`${basePath}/api/call/${btn.dataset.id}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error('Failed to clear call:', e);
+      }
+    });
+  });
 }
 
 function renderQueue() {
@@ -231,8 +253,10 @@ function renderQueue() {
     return;
   }
 
+  const canClearCalls = isSupervisor || isSuperAdmin;
   const queueTimesCalledHeader = permissions.callCountByNumber ? '<th class="text-center">Times Called</th>' : '';
-  let html = `<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th>${queueTimesCalledHeader}<th>Status</th><th></th></tr></thead><tbody>`;
+  const removeHeader = canClearCalls ? '<th></th>' : '';
+  let html = `<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th>${queueTimesCalledHeader}<th>Status</th>${removeHeader}</tr></thead><tbody>`;
   for (let i = 0; i < queue.length; i++) {
     const call = queue[i];
     const tag = call.ringing ? '<span class="status status-ringing">Ringing</span>'
@@ -242,6 +266,9 @@ function renderQueue() {
       const cnt = counts?.[call.callerNumber] || 0;
       return `<td class="text-center">${cnt > 1 ? `<span class="repeat-caller-badge">${cnt}</span>` : (cnt || '--')}</td>`;
     })() : '';
+    const removeCell = canClearCalls
+      ? `<td><button class="queue-remove-btn" data-id="${call.id}" title="Remove from queue">&times;</button></td>`
+      : '';
     html += `<tr>
       <td>${i + 1}</td>
       <td>${call.callerNumber || '--'}</td>
@@ -250,7 +277,7 @@ function renderQueue() {
       <td class="duration">${formatDuration(call.startTime)}</td>
       ${queueTimesCalledCell}
       <td>${tag}</td>
-      <td><button class="queue-remove-btn" data-id="${call.id}" title="Remove from queue">&times;</button></td>
+      ${removeCell}
     </tr>`;
   }
   html += '</tbody></table>';
@@ -502,6 +529,7 @@ async function init() {
     const user = await res.json();
     permissions = user?.permissions || {};
     isSuperAdmin = !!user?.superAdmin;
+    isSupervisor = !!user?.supervisor;
 
     // Populate MS nav profile
     if (user?.name) {
@@ -527,8 +555,8 @@ async function init() {
       document.getElementById('settings-btn').style.display = '';
       initSettingsPanel();
     }
-    // Reports link for supervisors and superAdmins
-    if (user?.supervisor || isSuperAdmin) {
+    // Reports link is gated by the configured visibility tier (supervisors / approvedUsers / selfOnly).
+    if (permissions.reports) {
       document.getElementById('reports-nav-link').style.display = '';
     }
 
@@ -707,7 +735,17 @@ const FEATURE_LABELS = {
   repeatCallers: 'Repeat Callers',
   agentMetrics: 'Agent Metrics (Login, Calls, Outbound)',
   callCountByNumber: 'Times Called Column',
+  reports: 'Reports',
 };
+
+const TIER_LABELS = {
+  all: 'All Users',
+  supervisors: 'Supervisors Only',
+  approvedUsers: 'Approved Users',
+  selfOnly: 'All Users (own data only)',
+};
+
+const FALLBACK_TIERS = ['all', 'supervisors', 'approvedUsers'];
 
 async function initSettingsPanel() {
   const basePath = location.pathname.replace(/\/$/, '');
@@ -717,12 +755,14 @@ async function initSettingsPanel() {
 
   let config = {};
   let userList = [];
+  let featureTiers = {};
 
   try {
     const res = await fetch(`${basePath}/api/settings/visibility`);
     const data = await res.json();
     config = data.config || {};
     userList = data.users || [];
+    featureTiers = data.featureTiers || {};
   } catch {
     body.innerHTML = '<p class="p-3 text-danger">Failed to load settings.</p>';
     return;
@@ -732,13 +772,15 @@ async function initSettingsPanel() {
     let html = '';
     for (const [key, label] of Object.entries(FEATURE_LABELS)) {
       const feat = config[key] || { visibility: 'supervisors', approvedUsers: [] };
+      const tiers = featureTiers[key] || FALLBACK_TIERS;
+      const optionsHtml = tiers
+        .map((t) => `<option value="${t}"${feat.visibility === t ? ' selected' : ''}>${TIER_LABELS[t] || t}</option>`)
+        .join('');
       html += `
       <div class="settings-feature-row">
         <div class="settings-feature-label">${label}</div>
         <select class="form-select form-select-sm settings-visibility-select" data-feature="${key}">
-          <option value="all"${feat.visibility === 'all' ? ' selected' : ''}>All Users</option>
-          <option value="supervisors"${feat.visibility === 'supervisors' ? ' selected' : ''}>Supervisors Only</option>
-          <option value="approvedUsers"${feat.visibility === 'approvedUsers' ? ' selected' : ''}>Approved Users</option>
+          ${optionsHtml}
         </select>
         <div class="settings-approved-users" data-feature="${key}" style="${feat.visibility === 'approvedUsers' ? '' : 'display:none'}">
           ${userList.map(u => `<label class="settings-user-check"><input type="checkbox" value="${u.id}"${feat.approvedUsers.includes(u.id) ? ' checked' : ''}> ${u.name}</label>`).join('')}

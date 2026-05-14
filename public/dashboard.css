@@ -17,14 +17,16 @@ body { background: #e8eaed; margin: 0; }
 .supervisor-tag { font-size: 0.7rem; background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }
 .callback-tag { font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; }
 .tz-toggle { font-size: 0.65rem; background: #e5e7eb; color: #374151; padding: 1px 5px; border-radius: 3px; margin-left: 4px; cursor: pointer; user-select: none; }
-.queue-remove-btn { background: none; border: none; color: #9ca3af; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
-.queue-remove-btn:hover { background: #fee2e2; color: #dc2626; }
-.queue-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.queue-remove-btn, .agent-call-clear-btn { background: none; border: none; color: #9ca3af; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.queue-remove-btn:hover, .agent-call-clear-btn:hover { background: #fee2e2; color: #dc2626; }
+.queue-remove-btn:disabled, .agent-call-clear-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Stats cards */
 .stat-card { text-align: center; }
 .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat-card .stat-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-top: 2px; }
+.stat-card .stat-team-avg { font-size: 0.7rem; color: #9ca3af; margin-top: 4px; font-variant-numeric: tabular-nums; }
+body.dark .stat-card .stat-team-avg { color: #6b7785; }
 .stat-card.stat-answered .stat-value { color: #166534; }
 .stat-card.stat-abandoned .stat-value { color: #991b1b; }
 .stat-card.stat-outbound .stat-value { color: #0369a1; }
@@ -102,8 +104,8 @@ body.dark .status-login { background: #132133; color: #787676; }
 body.dark .supervisor-tag { background: #1779ba33; color: #037fff; }
 body.dark .callback-tag { background: #3d2e08; color: #ffae00; }
 body.dark .tz-toggle { background: #1a2d42; color: #787676; }
-body.dark .queue-remove-btn { color: #787676; }
-body.dark .queue-remove-btn:hover { background: #4a1010; color: #f87171; }
+body.dark .queue-remove-btn, body.dark .agent-call-clear-btn { color: #787676; }
+body.dark .queue-remove-btn:hover, body.dark .agent-call-clear-btn:hover { background: #4a1010; color: #f87171; }
 body.dark .live-value { color: #f0f2f3; }
 body.dark .live-label, body.dark .live-detail { color: #787676; }
 body.dark .stat-card .stat-value { color: #f0f2f3; }

@@ -42,6 +42,8 @@ const fetchDashboardData = async (date) => {
   for (const call of activeCalls) {
     if ((call.status === 'ACTIVE' || call.status === 'RINGING') && call.userId) {
       activeCallsByUser[call.userId] = {
+        id: call.id,
+        status: call.status,
         callerNumber: maskNumber(call.callerNumber),
         callerName: call.callerName,
         companyName: call.companyName,
@@ -245,6 +247,34 @@ const getData = async (req, res) => {
   }
 };
 
+const clearAgentCall = async (req, res) => {
+  try {
+    const callRecord = await atp.calls.fetchOne(req.params.id);
+    if (!callRecord) {
+      return res.status(404).json({ error: 'Call record not found' });
+    }
+    if (callRecord.status !== 'ACTIVE') {
+      return res.status(400).json({ error: `Call is ${callRecord.status}, not ACTIVE — use queue remove instead` });
+    }
+
+    const endTime = new Date();
+    const duration = callRecord.startTime
+      ? (endTime - new Date(callRecord.startTime)) / 1000
+      : null;
+
+    await atp.calls.update(callRecord.id, {
+      status: 'COMPLETE',
+      endTime,
+      duration,
+    });
+
+    await broadcast();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to clear active call' });
+  }
+};
+
 const removeQueueCall = async (req, res) => {
   try {
     const callRecord = await atp.calls.fetchOne(req.params.id);
@@ -297,4 +327,5 @@ module.exports = {
   getStats,
   fetchDashboardData,
   removeQueueCall,
+  clearAgentCall,
 };
