@@ -10,6 +10,7 @@ const xmlparser = require('express-xml-bodyparser');
 const http = require('http');
 const { recoverWrapUps } = require('./helpers/wrapup_timers');
 const { recoverCallbackTimers } = require('./helpers/callback_timers');
+const { recoverBreakTimers } = require('./helpers/break_timers');
 const websocket = require('./helpers/websocket');
 
 // --- Configuration ---
@@ -238,6 +239,16 @@ server.listen(PORT, async () => {
   } catch (error) {
     logger.error({
       ...createAppLog({ operation: 'callback_recovery' }),
+      ...formatError(error),
+    });
+  }
+
+  // Recover any open break records — restart "ending soon" + "late" timers
+  try {
+    await recoverBreakTimers(logger);
+  } catch (error) {
+    logger.error({
+      ...createAppLog({ operation: 'break_recovery' }),
       ...formatError(error),
     });
   }

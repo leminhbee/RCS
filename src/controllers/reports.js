@@ -73,7 +73,7 @@ const getReports = async (req, res) => {
 
     // --- Call Volumes ---
     const dailyMap = {};
-    const totals = { total: 0, inbound: 0, outbound: 0, callbacks: 0, abandoned: 0 };
+    const totals = { total: 0, inbound: 0, outbound: 0, callbacks: 0, abandoned: 0, totalTalkTime: 0 };
 
     for (const call of calls) {
       const day = call.startTime ? call.startTime.slice(0, 10) : null;
@@ -101,6 +101,10 @@ const getReports = async (req, res) => {
       if (call.callBackRequested) {
         d.callbacks++;
         totals.callbacks++;
+      }
+
+      if (call.status === 'COMPLETE' && isSaneDuration(call.duration)) {
+        totals.totalTalkTime += call.duration;
       }
     }
 

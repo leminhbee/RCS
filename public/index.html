@@ -89,12 +89,6 @@
       <a href="reports.html" class="ms-nav-link" id="reports-nav-link" style="display:none">Reports</a>
     </div>
     <div class="ms-nav-right">
-      <button class="ms-icon-btn" id="settings-btn" style="display:none" title="Dashboard Settings" data-bs-toggle="modal" data-bs-target="#settings-modal">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
-      </button>
-      <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
-        <span class="knob" id="toggle-icon">&#9788;</span>
-      </button>
       <div class="dropdown">
         <button class="ms-icon-btn ms-profile-btn" id="profile-btn" aria-label="Account manager" title="Account manager" data-bs-toggle="dropdown" aria-expanded="false">
           <span class="ms-avatar" id="ms-avatar">?</span>
@@ -120,6 +114,36 @@
               </svg>
             </div>
             <span>Change password</span>
+          </a>
+          <div class="ms-panel-divider"></div>
+          <a href="#" id="preferences-menu" class="ms-switch-account-row" role="button" data-bs-toggle="modal" data-bs-target="#preferences-modal">
+            <div class="ms-switch-icon-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"/>
+                <polyline points="12 7 12 12 15 14"/>
+              </svg>
+            </div>
+            <span>Preferences</span>
+          </a>
+          <div id="admin-menu-divider" class="ms-panel-divider" style="display:none"></div>
+          <a href="#" id="user-flags-menu" class="ms-switch-account-row" style="display:none" role="button" data-bs-toggle="modal" data-bs-target="#user-flags-modal">
+            <div class="ms-switch-icon-wrap">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+            </div>
+            <span>User Permissions</span>
+          </a>
+          <a href="#" id="settings-menu" class="ms-switch-account-row" style="display:none" role="button" data-bs-toggle="modal" data-bs-target="#settings-modal">
+            <div class="ms-switch-icon-wrap">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+            </div>
+            <span>Dashboard Settings</span>
+          </a>
+          <div class="ms-panel-divider"></div>
+          <a href="#" id="theme-toggle-menu" class="ms-switch-account-row" role="button">
+            <div class="ms-switch-icon-wrap">
+              <span id="theme-toggle-icon" style="font-size:16px;line-height:1">&#9788;</span>
+            </div>
+            <span id="theme-toggle-label">Dark mode</span>
           </a>
           <div class="ms-panel-divider"></div>
           <a href="/auth/logout" class="ms-switch-account-row">
@@ -206,12 +230,86 @@
     </div>
   </div>
 
+  <!-- Preferences Modal (any user — edits their own reminders) -->
+  <div class="modal fade" id="preferences-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Preferences</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="preferences-modal-body">
+          <div class="preferences-row">
+            <label class="preferences-label" for="pref-break-input">Break reminder</label>
+            <div class="preferences-input-wrap">
+              <input type="number" min="0" step="1" class="form-control form-control-sm" id="pref-break-input">
+              <span class="preferences-unit">min</span>
+            </div>
+            <div class="preferences-hint">Warn me this many minutes before my 15-minute break ends.</div>
+          </div>
+          <div class="preferences-row">
+            <label class="preferences-label" for="pref-lunch-input">Lunch reminder</label>
+            <div class="preferences-input-wrap">
+              <input type="number" min="0" step="1" class="form-control form-control-sm" id="pref-lunch-input">
+              <span class="preferences-unit">min</span>
+            </div>
+            <div class="preferences-hint">Warn me this many minutes before my 60-minute lunch ends.</div>
+          </div>
+        </div>
+        <div class="modal-footer d-flex justify-content-between align-items-center">
+          <span id="preferences-feedback" class="settings-feedback"></span>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="preferences-reset-btn" disabled>Discard</button>
+            <button type="button" class="btn btn-primary btn-sm" id="preferences-save-btn" disabled>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Permissions Modal (Supervisors + SuperAdmins) -->
+  <div class="modal fade" id="user-flags-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">User Permissions</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <ul class="nav nav-tabs user-flags-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="user-flags-tab-permissions" data-bs-toggle="tab" data-bs-target="#user-flags-pane-permissions" type="button" role="tab">Permissions</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="user-flags-tab-reminders" data-bs-toggle="tab" data-bs-target="#user-flags-pane-reminders" type="button" role="tab">Reminders</button>
+            </li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="user-flags-pane-permissions" role="tabpanel">
+              <div id="user-flags-modal-body">Loading...</div>
+            </div>
+            <div class="tab-pane fade" id="user-flags-pane-reminders" role="tabpanel">
+              <div id="user-flags-reminders-body">Loading...</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer d-flex justify-content-between align-items-center">
+          <span id="user-flags-feedback" class="settings-feedback"></span>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="user-flags-reset-btn" disabled>Discard</button>
+            <button type="button" class="btn btn-primary btn-sm" id="user-flags-save-btn" disabled>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings Modal (SuperAdmin only) -->
   <div class="modal fade" id="settings-modal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Dashboard Visibility Settings</h5>
+          <h5 class="modal-title">Dashboard Settings</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" id="settings-modal-body">Loading...</div>

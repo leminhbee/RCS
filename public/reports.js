@@ -29,6 +29,11 @@ function formatSeconds(sec) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function formatMinutes(sec) {
+  if (sec == null || sec === 0) return '--';
+  return `${Math.round(sec / 60).toLocaleString()} min`;
+}
+
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -87,6 +92,7 @@ function renderCallVolumes(data) {
     { value: totals.outbound, label: 'Outbound', cls: 'stat-outbound' },
     { value: totals.callbacks, label: 'Callbacks', cls: 'stat-callback' },
     { value: totals.abandoned, label: 'Missed / Abandoned', cls: 'stat-abandoned' },
+    { value: formatMinutes(totals.totalTalkTime || 0), label: 'Total Talk Time', cls: '' },
   ];
 
   document.getElementById('volume-totals').innerHTML = cards.map((c) => `
@@ -280,12 +286,22 @@ function renderAgentActivity(agents) {
     html += `<tr>
       <td>${agent.agentName}</td>
       <td class="text-center">${agent.callsHandled}</td>
-      <td class="text-center">${formatSeconds(agent.totalTalkTime)}</td>
+      <td class="text-center">${formatMinutes(agent.totalTalkTime)}</td>
       <td class="text-center">${formatSeconds(agent.avgCallDuration)}</td>
       <td class="text-center">${agent.longCalls || 0}</td>
     </tr>`;
   }
-  html += '</tbody></table>';
+  const totalCalls = sorted.reduce((s, a) => s + (a.callsHandled || 0), 0);
+  const totalTalk = sorted.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+  const totalLong = sorted.reduce((s, a) => s + (a.longCalls || 0), 0);
+  const teamAvg = totalCalls > 0 ? Math.round(totalTalk / totalCalls) : 0;
+  html += `</tbody><tfoot><tr class="fw-bold">
+    <td>Team Totals</td>
+    <td class="text-center">${totalCalls}</td>
+    <td class="text-center">${formatMinutes(totalTalk)}</td>
+    <td class="text-center">${formatSeconds(teamAvg)}</td>
+    <td class="text-center">${totalLong}</td>
+  </tr></tfoot></table>`;
   container.innerHTML = html;
 
   container.querySelector('thead').addEventListener('click', (e) => {
@@ -686,9 +702,9 @@ function exportCSV() {
 
   // Call Volumes - Totals
   row('CALL VOLUMES - TOTALS');
-  row('Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned');
+  row('Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned', 'Total Talk Time');
   const t = reportData.callVolumes.totals;
-  row(t.total, t.inbound, t.outbound, t.callbacks, t.abandoned);
+  row(t.total, t.inbound, t.outbound, t.callbacks, t.abandoned, formatMinutes(t.totalTalkTime || 0));
   blank();
 
   // Call Volumes - Daily
@@ -710,7 +726,13 @@ function exportCSV() {
   row('AGENT ACTIVITY');
   row('Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls');
   for (const a of reportData.agentActivity) {
-    row(a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0);
+    row(a.agentName, a.callsHandled, formatMinutes(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0);
+  }
+  {
+    const tc = reportData.agentActivity.reduce((s, a) => s + (a.callsHandled || 0), 0);
+    const tt = reportData.agentActivity.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+    const tl = reportData.agentActivity.reduce((s, a) => s + (a.longCalls || 0), 0);
+    row('Team Totals', tc, formatMinutes(tt), formatSeconds(tc > 0 ? Math.round(tt / tc) : 0), tl);
   }
   blank();
 
@@ -781,8 +803,8 @@ function exportPDF() {
   const t = reportData.callVolumes.totals;
   doc.autoTable({
     ...tableOpts, startY: yPos,
-    head: [['Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned']],
-    body: [[t.total, t.inbound, t.outbound, t.callbacks, t.abandoned]],
+    head: [['Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned', 'Total Talk Time']],
+    body: [[t.total, t.inbound, t.outbound, t.callbacks, t.abandoned, formatMinutes(t.totalTalkTime || 0)]],
   });
   yPos = doc.lastAutoTable.finalY + 8;
 
@@ -807,11 +829,18 @@ function exportPDF() {
 
   // Agent Activity
   sectionHeading('Agent Activity');
-  doc.autoTable({
-    ...tableOpts, startY: yPos,
-    head: [['Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls']],
-    body: reportData.agentActivity.map((a) => [a.agentName, a.callsHandled, formatSeconds(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0]),
-  });
+  {
+    const tc = reportData.agentActivity.reduce((s, a) => s + (a.callsHandled || 0), 0);
+    const tt = reportData.agentActivity.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+    const tl = reportData.agentActivity.reduce((s, a) => s + (a.longCalls || 0), 0);
+    doc.autoTable({
+      ...tableOpts, startY: yPos,
+      head: [['Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls']],
+      body: reportData.agentActivity.map((a) => [a.agentName, a.callsHandled, formatMinutes(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0]),
+      foot: [['Team Totals', tc, formatMinutes(tt), formatSeconds(tc > 0 ? Math.round(tt / tc) : 0), tl]],
+      footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', fontSize: 8 },
+    });
+  }
   yPos = doc.lastAutoTable.finalY + 8;
 
   // Cases Summary

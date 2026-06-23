@@ -4,6 +4,9 @@ const { createStatusLog, formatError } = require('../helpers/log_schema');
 const moment = require('moment');
 const { isInWrapUp, clearWrapUp, startWrapUp } = require('../helpers/wrapup_timers');
 const { checkCallbackQueue } = require('../helpers/callback_timers');
+const { startBreak, endBreak } = require('../helpers/break_timers');
+
+const BREAK_STATES = { LUNCH: 'Lunch', 'ON-BREAK': 'Break', 'Bathroom Break': 'Bathroom' };
 
 const handleRequest = async (req, res) => {
   const { messageId, logger } = req;
@@ -255,6 +258,19 @@ const handleRequest = async (req, res) => {
           },
         })
       );
+    }
+
+    // Open/close break records on transitions into/out of Lunch/Break/Bathroom.
+    // Compute against user.currentStatus before the ATP update below changes it.
+    // breaksEnabled gates new break starts. endBreak is always allowed so that if
+    // the flag is flipped off mid-break, the open record still closes cleanly.
+    const wasBreak = BREAK_STATES[user.currentStatus];
+    const nowBreak = BREAK_STATES[body.event_aux_type];
+    if (wasBreak && wasBreak !== nowBreak) {
+      await endBreak(user, logger);
+    }
+    if (user.breaksEnabled && nowBreak && nowBreak !== wasBreak) {
+      await startBreak(user, nowBreak, logger);
     }
 
     if (statusMap[body.event_aux_type]) {

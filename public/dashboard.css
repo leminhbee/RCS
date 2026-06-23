@@ -76,10 +76,6 @@ body.dark .col-picker-footer { border-top-color: #2a3f55; }
 body.dark .col-picker-footer button { color: #8899aa; }
 body.dark .col-picker-footer button:hover { color: #e0e8f0; }
 
-/* Toggle button */
-.theme-toggle { background: #d0d3d8; border: none; border-radius: 20px; width: 48px; height: 26px; cursor: pointer; display: flex; align-items: center; padding: 3px; transition: background 0.3s; flex-shrink: 0; }
-.theme-toggle .knob { width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.3s; display: flex; align-items: center; justify-content: center; font-size: 12px; }
-
 /* Dark mode */
 body.dark { background: #071323; color: #f0f2f3; --bs-body-color: #f0f2f3; --bs-body-bg: #071323; }
 body.dark .card { background: #132133; border-color: #1779ba22; color: #f0f2f3; }
@@ -323,8 +319,8 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 .ms-switch-account-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 6px 14px;
   background: #f2f2f2;
   text-decoration: none;
   color: #333;
@@ -334,8 +330,8 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
 .ms-switch-account-row span { font-size: 0.85rem; }
 
 .ms-switch-icon-wrap {
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   background: #ccc;
   color: #555;
@@ -344,6 +340,7 @@ body.dark .ms-nav .theme-toggle .knob { color: #0078d4; }
   justify-content: center;
   flex-shrink: 0;
 }
+.ms-switch-icon-wrap svg { width: 14px; height: 14px; }
 
 /* ── Dark mode: panels ── */
 body.dark .ms-app-panel, body.dark .ms-profile-panel { background: #1a2d42; border-color: #2a3f55; }
@@ -393,3 +390,69 @@ body.dark .btn-close { filter: invert(1); }
 .settings-user-check { font-size: 0.875rem; display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .settings-feedback { font-size: 0.85rem; }
 body.dark .settings-feature-row { border-bottom-color: #2a3f55; }
+
+/* User flags panel */
+.user-flags-table-wrap { max-height: 60vh; overflow: auto; }
+.user-flags-table { margin: 0; }
+.user-flags-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: #f8fafc; border-bottom: 1px solid #e5e7eb;
+  font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+  padding: 8px 10px;
+}
+.user-flags-table tbody td { padding: 8px 10px; vertical-align: middle; }
+.user-flags-table tbody tr:hover { background: #f8fafc; }
+.user-flags-name {
+  position: sticky; left: 0; z-index: 1;
+  background: #fff; min-width: 200px;
+  border-right: 1px solid #e5e7eb;
+}
+.user-flags-table thead .user-flags-name { z-index: 3; background: #f8fafc; }
+.user-flags-email { font-size: 0.75rem; color: #6b7280; margin-top: 2px; }
+.user-flags-col { min-width: 100px; }
+.user-flags-col-label { vertical-align: middle; }
+.user-flags-info {
+  display: inline-block; margin-left: 4px; vertical-align: middle;
+  color: #9ca3af; font-size: 0.95em; cursor: help; user-select: none;
+}
+.user-flags-info:hover, .user-flags-info:focus { color: #4b5563; outline: none; }
+body.dark .user-flags-info { color: #6b7d92; }
+body.dark .user-flags-info:hover, body.dark .user-flags-info:focus { color: #a7b6c7; }
+
+/* Bootstrap tooltip readability in dark mode.
+   Bootstrap 5.3 sets --bs-tooltip-color: var(--bs-body-bg), which becomes
+   the dark page background under body.dark — making text invisible. */
+body.dark .tooltip {
+  --bs-tooltip-bg: #1a2d42;
+  --bs-tooltip-color: #f0f2f3;
+}
+.user-flags-dirty { background: #fef3c7; }
+.user-flags-table .form-check-input { cursor: pointer; }
+body.dark .user-flags-table thead th { background: #1a2a3f; border-bottom-color: #2a3f55; color: #cdd5e0; }
+body.dark .user-flags-table tbody tr:hover { background: #0e1e2f; }
+body.dark .user-flags-name { background: #132133; border-right-color: #2a3f55; }
+body.dark .user-flags-table thead .user-flags-name { background: #1a2a3f; }
+body.dark .user-flags-email { color: #8899aa; }
+body.dark .user-flags-dirty { background: #3d2e08; }
+
+/* Tabs inside the User Permissions modal */
+.user-flags-tabs { padding: 0 8px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; }
+.user-flags-tabs .nav-link { color: #4b5563; }
+.user-flags-tabs .nav-link.active { color: #111827; background: #fff; }
+body.dark .user-flags-tabs { background: #0e1a2b; border-bottom-color: #2a3f55; }
+body.dark .user-flags-tabs .nav-link { color: #8899aa; }
+body.dark .user-flags-tabs .nav-link.active { color: #f0f2f3; background: #132133; border-color: #2a3f55 #2a3f55 #132133; }
+
+/* Number inputs in the reminders tab table */
+.user-flags-num { width: 80px; margin: 0 auto; text-align: center; }
+
+/* Preferences modal */
+.preferences-row { padding: 14px 0; border-bottom: 1px solid #e5e7eb; }
+.preferences-row:last-child { border-bottom: none; }
+.preferences-label { font-weight: 600; display: block; margin-bottom: 6px; }
+.preferences-input-wrap { display: inline-flex; align-items: center; gap: 8px; }
+.preferences-input-wrap .form-control { width: 90px; }
+.preferences-unit { color: #6b7280; font-size: 0.9rem; }
+.preferences-hint { color: #6b7280; font-size: 0.8rem; margin-top: 6px; }
+body.dark .preferences-row { border-bottom-color: #2a3f55; }
+body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
