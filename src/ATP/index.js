@@ -3,4 +3,5 @@ module.exports = {
   breaks: require('./breaks'),
   calls: require('./calls'),
   settings: require('./settings'),
+  announcements: require('./announcements'),
 };

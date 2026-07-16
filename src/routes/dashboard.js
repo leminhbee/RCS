@@ -2,6 +2,11 @@ const router = require('express').Router();
 const dashboardController = require('../controllers/dashboard');
 const reportsController = require('../controllers/reports');
 const atp = require('../ATP');
+const ava = require('../AVA');
+const websocket = require('../helpers/websocket');
+const { createLogger } = require('../helpers/logger');
+
+const announcementsLogger = createLogger('announcements');
 const {
   getVisibilityConfig,
   getPermissions,
@@ -209,6 +214,200 @@ router.put('/api/settings/visibility', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update visibility settings' });
+  }
+});
+
+// SuperAdmin: Slack channels map (name → channel id or #name)
+router.get('/api/settings/channels', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const setting = await atp.settings.fetchOne({ key: 'channels' });
+    const raw = setting?.value;
+    const value = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    res.json({ channels: value });
+  } catch {
+    res.status(500).json({ error: 'Failed to load channels' });
+  }
+});
+
+router.put('/api/settings/channels', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const incoming = req.body?.channels;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return res.status(400).json({ error: 'channels must be an object' });
+  }
+  const cleaned = {};
+  for (const [rawName, rawId] of Object.entries(incoming)) {
+    const name = String(rawName || '').trim();
+    const id = String(rawId ?? '').trim();
+    if (!name || !id) return res.status(400).json({ error: 'Every channel needs a name and an id' });
+    if (Object.prototype.hasOwnProperty.call(cleaned, name)) {
+      return res.status(400).json({ error: `Duplicate channel name: ${name}` });
+    }
+    cleaned[name] = id;
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'channels' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: cleaned });
+    } else {
+      await atp.settings.create({ key: 'channels', value: cleaned });
+    }
+    res.json({ channels: cleaned });
+  } catch {
+    res.status(500).json({ error: 'Failed to save channels' });
+  }
+});
+
+// --- Announcements ---
+
+function userDisplayName(u) {
+  return `${u.nameFirst || ''} ${u.nameLast || ''}`.trim() || u.email || u.id;
+}
+
+router.get('/api/announcements/all', async (req, res) => {
+  try {
+    const [list, users] = await Promise.all([
+      atp.announcements.fetchAll({}),
+      atp.users.fetchAll({}),
+    ]);
+    const userById = new Map((users || []).map((u) => [u.id, userDisplayName(u)]));
+    const isSup = !!(req.session.user.superAdmin || req.session.user.supervisor);
+    const eligible = isSup
+      ? (users || [])
+          .filter((u) => !u.supervisor)
+          .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
+      : null;
+    const myId = req.session.user.id;
+    const enriched = await Promise.all(
+      (list || []).map(async (a) => {
+        let acks = [];
+        try {
+          acks = (await atp.announcements.fetchAcks(a.id)) || [];
+        } catch {}
+        const acknowledgedByMe = acks.some((ack) => ack.userId === myId);
+        const base = {
+          ...a,
+          createdByName: userById.get(a.createdBy) || 'Unknown',
+          acknowledgedByMe,
+          ackCount: acks.length,
+        };
+        if (isSup && eligible) {
+          const ackById = new Map(acks.map((ack) => [ack.userId, ack.ackedAt]));
+          const acknowledged = [];
+          const pending = [];
+          for (const u of eligible) {
+            const row = { userId: u.id, name: userDisplayName(u) };
+            if (ackById.has(u.id)) acknowledged.push({ ...row, ackedAt: ackById.get(u.id) });
+            else pending.push(row);
+          }
+          acknowledged.sort((a, b) => a.name.localeCompare(b.name));
+          pending.sort((a, b) => a.name.localeCompare(b.name));
+          base.acknowledged = acknowledged;
+          base.pending = pending;
+          base.eligibleCount = eligible.length;
+        }
+        return base;
+      })
+    );
+    enriched.sort((a, b) => {
+      if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    res.json({ announcements: enriched });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcements' });
+  }
+});
+
+router.get('/api/announcements', async (req, res) => {
+  try {
+    const list = await atp.announcements.fetchAll({ active: true });
+    const userId = req.session.user.id;
+    const enriched = await Promise.all(
+      (list || []).map(async (a) => {
+        let acknowledgedByMe = false;
+        try {
+          const acks = await atp.announcements.fetchAcks(a.id);
+          acknowledgedByMe = (acks || []).some((ack) => ack.userId === userId);
+        } catch {}
+        return { ...a, acknowledgedByMe };
+      })
+    );
+    enriched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ announcements: enriched });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcements' });
+  }
+});
+
+router.post('/api/announcements', requireSupervisor, async (req, res) => {
+  const title = String(req.body?.title || '').trim();
+  const body = String(req.body?.body || '').trim();
+  if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
+  if (title.length > 200) return res.status(400).json({ error: 'title must be 200 chars or fewer' });
+  try {
+    const created = await atp.announcements.create({
+      title,
+      body,
+      createdBy: req.session.user.id,
+    });
+    // Fire-and-forget Slack canvas post.
+    ava.announcements
+      .post(title, body, userDisplayName(req.session.user))
+      .catch((err) => announcementsLogger.error({ err: err.message }, 'AVA announcement post failed'));
+    // Push to all open dashboards.
+    websocket.broadcast().catch(() => {});
+    res.json(created);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create announcement' });
+  }
+});
+
+router.delete('/api/announcements/:id', requireSupervisor, async (req, res) => {
+  try {
+    await atp.announcements.update(req.params.id, { active: false });
+    websocket.broadcast().catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to clear announcement' });
+  }
+});
+
+router.post('/api/announcements/:id/ack', async (req, res) => {
+  try {
+    await atp.announcements.acknowledge(req.params.id, req.session.user.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to acknowledge announcement' });
+  }
+});
+
+router.get('/api/announcements/:id/acks', requireSupervisor, async (req, res) => {
+  try {
+    const [acks, users] = await Promise.all([
+      atp.announcements.fetchAcks(req.params.id),
+      atp.users.fetchAll({}),
+    ]);
+    const eligible = (users || [])
+      .filter((u) => !u.supervisor)
+      .filter((u) => String(u.rcExtension ?? '').startsWith('82'));
+    const ackById = new Map((acks || []).map((a) => [a.userId, a.ackedAt]));
+    const acknowledged = [];
+    const pending = [];
+    for (const u of eligible) {
+      const row = { userId: u.id, name: userDisplayName(u) };
+      if (ackById.has(u.id)) {
+        acknowledged.push({ ...row, ackedAt: ackById.get(u.id) });
+      } else {
+        pending.push(row);
+      }
+    }
+    acknowledged.sort((a, b) => a.name.localeCompare(b.name));
+    pending.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ acknowledged, pending });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcement acks' });
   }
 });
 

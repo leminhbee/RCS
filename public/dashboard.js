@@ -42,7 +42,7 @@ const CALL_COLUMNS = {
   agentName:     { label: 'Agent',         sortVal: c => c.agentName || '',                           render: c => c.agentName || '--' },
   duration:      { label: 'Call Duration', sortVal: c => c.duration || 0,                             render: c => formatSeconds(c.duration) },
   queueDuration: { label: 'Queue Wait',    sortVal: c => c.queueDuration || 0,                        render: c => formatSeconds(c.queueDuration) },
-  endTime:       { label: 'Ended',         sortVal: c => c.endTime ? new Date(c.endTime).getTime() : 0, render: c => formatTimeAgo(c.endTime) },
+  endTime:       { label: 'Ended',         sortVal: c => c.endTime ? new Date(c.endTime).getTime() : 0, render: c => `<span class="js-end-time-ago" data-end="${c.endTime || ''}">${formatTimeAgo(c.endTime)}</span>` },
   sfCase:        { label: 'SF Case',       sortVal: c => c.salesforceCaseNumber || '',                render: c => c.salesforceCaseId && c.salesforceCaseNumber ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${c.salesforceCaseId}/view" target="_blank" rel="noopener">${c.salesforceCaseNumber}</a>` : '--' },
   caseSubject:   { label: 'Subject',       sortVal: c => c.caseSubject || '',                         render: c => c.caseSubject || '--' },
 };
@@ -146,23 +146,6 @@ function formatLoginTime(dateStr) {
   return new Date(dateStr).toLocaleTimeString('en-US', opts);
 }
 
-// Theme toggle (lives in the profile dropdown)
-const themeMenu = document.getElementById('theme-toggle-menu');
-const themeIcon = document.getElementById('theme-toggle-icon');
-const themeLabel = document.getElementById('theme-toggle-label');
-function applyTheme(dark) {
-  document.body.classList.toggle('dark', dark);
-  themeIcon.innerHTML = dark ? '&#9788;' : '&#9790;'; // show what we'd switch TO
-  themeLabel.textContent = dark ? 'Light mode' : 'Dark mode';
-  localStorage.setItem('theme', dark ? 'dark' : 'light');
-}
-themeMenu.addEventListener('click', (e) => {
-  e.preventDefault();
-  applyTheme(!document.body.classList.contains('dark'));
-});
-applyTheme(localStorage.getItem('theme') === 'dark');
-
-
 function formatDuration(since) {
   if (!since) return '--';
   const seconds = Math.floor((Date.now() - new Date(since)) / 1000);
@@ -210,15 +193,15 @@ function renderAgents() {
             : ''
         }`
       : '';
-    html += `<tr>
+    html += `<tr data-agent-id="${agent.id}">
       <td>${agent.name}${sup}</td>
-      <td><span class="status ${stClass}">${agent.status || '--'}</span></td>
-      <td class="duration">${formatDuration(agent.statusSince)}</td>
+      <td><span class="status js-status ${stClass}" data-since="${agent.statusSince}">${agent.status || '--'}</span></td>
+      <td class="duration js-duration-status">${formatDuration(agent.statusSince)}</td>
       ${metricsCells}${timesCalledCell}
       <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
       <td>${agent.activeCall?.callerName || ''}</td>
       <td>${agent.activeCall?.companyName || ''}</td>
-      <td class="duration">${callDurationCell}</td>
+      <td class="duration js-duration-call" data-start="${agent.activeCall?.startTime || ''}">${callDurationCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -243,6 +226,34 @@ function renderAgents() {
         console.error('Failed to clear call:', e);
       }
     });
+  });
+}
+
+function renderAgentsTick() {
+  const agents = dashboardData.agents;
+  document.getElementById('agent-count').textContent = agents.length;
+  const byId = new Map(agents.map(a => [a.id, a]));
+  document.querySelectorAll('#agents-table tbody tr[data-agent-id]').forEach((row) => {
+    const agent = byId.get(row.dataset.agentId);
+    if (!agent) return;
+
+    const statusCell = row.querySelector('.js-duration-status');
+    if (statusCell) statusCell.textContent = formatDuration(agent.statusSince);
+
+    const callCell = row.querySelector('.js-duration-call');
+    if (callCell && agent.activeCall) {
+      // Rewrite only the leading text node so the clear button (if present) survives.
+      const text = formatDuration(agent.activeCall.startTime);
+      const firstText = [...callCell.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
+      if (firstText) firstText.nodeValue = callCell.querySelector('button') ? text + ' ' : text;
+      else callCell.prepend(document.createTextNode(text));
+    }
+
+    const statusEl = row.querySelector('.js-status');
+    if (statusEl && (agent.status === 'ENGAGED' || agent.status === 'OUTBOUND')) {
+      const secs = Math.floor((Date.now() - new Date(agent.statusSince)) / 1000);
+      statusEl.classList.toggle('status-on-call-long', secs >= 1800);
+    }
   });
 }
 
@@ -272,12 +283,12 @@ function renderQueue() {
     const removeCell = canClearCalls
       ? `<td><button class="queue-remove-btn" data-id="${call.id}" title="Remove from queue">&times;</button></td>`
       : '';
-    html += `<tr>
+    html += `<tr data-call-id="${call.id}">
       <td>${i + 1}</td>
       <td>${call.callerNumber || '--'}</td>
       <td>${call.callerName || '--'}</td>
       <td>${call.companyName || '--'}</td>
-      <td class="duration">${formatDuration(call.startTime)}</td>
+      <td class="duration js-duration-wait" data-start="${call.startTime}">${formatDuration(call.startTime)}</td>
       ${queueTimesCalledCell}
       <td>${tag}</td>
       ${removeCell}
@@ -309,6 +320,18 @@ function renderQueue() {
       }, { once: true });
       bsModal.show();
     });
+  });
+}
+
+function renderQueueTick() {
+  const queue = dashboardData.queue;
+  document.getElementById('queue-count').textContent = queue.length;
+  const byId = new Map(queue.map(c => [c.id, c]));
+  document.querySelectorAll('#queue-table tbody tr[data-call-id]').forEach((row) => {
+    const call = byId.get(row.dataset.callId);
+    if (!call) return;
+    const cell = row.querySelector('.js-duration-wait');
+    if (cell) cell.textContent = formatDuration(call.startTime);
   });
 }
 
@@ -456,6 +479,12 @@ function renderCallList() {
   });
 }
 
+function renderCallListTick() {
+  document.querySelectorAll('#recent-calls-table .js-end-time-ago[data-end]').forEach((el) => {
+    el.textContent = formatTimeAgo(el.dataset.end);
+  });
+}
+
 function renderRepeatCallers() {
   if (!permissions.repeatCallers) return;
   const container = document.getElementById('repeat-callers-table');
@@ -555,6 +584,12 @@ async function init() {
 
     // Self-service preferences (any user)
     initPreferencesPanel();
+
+    // Announcement banner (all users) + compose entrypoint (supervisors)
+    initAnnouncements();
+    if (isSupervisor || isSuperAdmin) {
+      document.getElementById('announcement-menu').style.display = '';
+    }
 
     // SuperAdmin settings menu item
     if (isSuperAdmin) {
@@ -772,11 +807,14 @@ async function initSettingsPanel() {
   let userList = [];
   let featureTiers = {};
   let bufferMin = 2;
+  // Channels stored as an array to preserve display order and allow duplicate-name detection while editing.
+  let channels = [];
 
   try {
-    const [visRes, bufRes] = await Promise.all([
+    const [visRes, bufRes, chanRes] = await Promise.all([
       fetch(`${basePath}/api/settings/visibility`),
       fetch(`${basePath}/api/settings/breakLateBuffer`),
+      fetch(`${basePath}/api/settings/channels`),
     ]);
     const data = await visRes.json();
     config = data.config || {};
@@ -786,9 +824,63 @@ async function initSettingsPanel() {
       const bufData = await bufRes.json();
       bufferMin = secToMin(bufData.seconds);
     }
+    if (chanRes.ok) {
+      const chanData = await chanRes.json();
+      channels = Object.entries(chanData.channels || {}).map(([name, id]) => ({ name, id }));
+    }
   } catch {
     body.innerHTML = '<p class="p-3 text-danger">Failed to load settings.</p>';
     return;
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function channelRowHtml(c, i) {
+    return `
+      <div class="settings-channel-row" data-idx="${i}">
+        <input type="text" class="form-control form-control-sm settings-channel-name" data-idx="${i}" value="${escapeAttr(c.name)}">
+        <input type="text" class="form-control form-control-sm settings-channel-id" data-idx="${i}" value="${escapeAttr(c.id)}">
+        <button type="button" class="btn btn-outline-danger btn-sm settings-channel-remove" data-idx="${i}" aria-label="Remove">&times;</button>
+      </div>`;
+  }
+
+  function refreshChannelsList() {
+    const list = body.querySelector('#settings-channels-list');
+    if (!list) return;
+    list.innerHTML = channels.map((c, i) => channelRowHtml(c, i)).join('');
+    bindChannelRowEvents();
+  }
+
+  function bindChannelRowEvents() {
+    body.querySelectorAll('.settings-channel-name').forEach((input) => {
+      input.addEventListener('input', () => {
+        const idx = Number(input.dataset.idx);
+        if (Number.isFinite(idx) && channels[idx]) {
+          channels[idx].name = input.value;
+          feedback.textContent = '';
+        }
+      });
+    });
+    body.querySelectorAll('.settings-channel-id').forEach((input) => {
+      input.addEventListener('input', () => {
+        const idx = Number(input.dataset.idx);
+        if (Number.isFinite(idx) && channels[idx]) {
+          channels[idx].id = input.value;
+          feedback.textContent = '';
+        }
+      });
+    });
+    body.querySelectorAll('.settings-channel-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.idx);
+        if (!Number.isFinite(idx)) return;
+        channels.splice(idx, 1);
+        refreshChannelsList();
+        feedback.textContent = '';
+      });
+    });
   }
 
   function renderSettingsForm() {
@@ -819,6 +911,19 @@ async function initSettingsPanel() {
         </div>
       </div>`;
     }
+    html += `
+      <div class="settings-feature-row">
+        <div class="settings-feature-label">Slack Channels</div>
+        <div class="preferences-hint">Name → Slack channel id (or #name). Used by other services to route notifications.</div>
+        <div class="settings-channels-list" id="settings-channels-list">
+          ${channels.map((c, i) => channelRowHtml(c, i)).join('')}
+        </div>
+        <div class="settings-channels-add">
+          <input type="text" class="form-control form-control-sm" id="settings-channel-new-name" placeholder="name (e.g. leads)">
+          <input type="text" class="form-control form-control-sm" id="settings-channel-new-id" placeholder="channel id (e.g. C046GCASJBH)">
+          <button type="button" class="btn btn-outline-primary btn-sm" id="settings-channel-add-btn">Add</button>
+        </div>
+      </div>`;
     body.innerHTML = html;
 
     body.querySelectorAll('.settings-visibility-select').forEach(sel => {
@@ -845,6 +950,30 @@ async function initSettingsPanel() {
       bufferMin = Math.max(0, Math.round(Number(bufferInput.value) || 0));
       feedback.textContent = '';
     });
+
+    bindChannelRowEvents();
+    const addBtn = body.querySelector('#settings-channel-add-btn');
+    const newName = body.querySelector('#settings-channel-new-name');
+    const newId = body.querySelector('#settings-channel-new-id');
+    addBtn.addEventListener('click', () => {
+      const name = newName.value.trim();
+      const id = newId.value.trim();
+      if (!name || !id) {
+        feedback.textContent = 'Channel name and id are both required.';
+        feedback.className = 'settings-feedback text-danger';
+        return;
+      }
+      if (channels.some((c) => c.name.trim() === name)) {
+        feedback.textContent = `A channel named "${name}" already exists.`;
+        feedback.className = 'settings-feedback text-danger';
+        return;
+      }
+      channels.push({ name, id });
+      newName.value = '';
+      newId.value = '';
+      refreshChannelsList();
+      feedback.textContent = '';
+    });
   }
 
   renderSettingsForm();
@@ -852,8 +981,29 @@ async function initSettingsPanel() {
   saveBtn.onclick = async () => {
     saveBtn.disabled = true;
     feedback.textContent = '';
+
+    // Build channels payload; reject empty names/ids and duplicates before hitting the server.
+    const channelsPayload = {};
+    for (const c of channels) {
+      const name = c.name.trim();
+      const id = c.id.trim();
+      if (!name || !id) {
+        feedback.textContent = 'Every channel needs a non-empty name and id.';
+        feedback.className = 'settings-feedback text-danger';
+        saveBtn.disabled = false;
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(channelsPayload, name)) {
+        feedback.textContent = `Duplicate channel name: ${name}`;
+        feedback.className = 'settings-feedback text-danger';
+        saveBtn.disabled = false;
+        return;
+      }
+      channelsPayload[name] = id;
+    }
+
     try {
-      const [visRes, bufRes] = await Promise.all([
+      const [visRes, bufRes, chanRes] = await Promise.all([
         fetch(`${basePath}/api/settings/visibility`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -864,8 +1014,13 @@ async function initSettingsPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ seconds: minToSec(bufferMin) }),
         }),
+        fetch(`${basePath}/api/settings/channels`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channels: channelsPayload }),
+        }),
       ]);
-      if (!visRes.ok || !bufRes.ok) throw new Error('Save failed');
+      if (!visRes.ok || !bufRes.ok || !chanRes.ok) throw new Error('Save failed');
       feedback.textContent = 'Saved! Reload the page to see changes.';
       feedback.className = 'settings-feedback text-success';
     } catch {
@@ -1180,15 +1335,212 @@ async function initUserFlagsPanel() {
   load();
 }
 
-// Update ticking timers every 1 second
+// -- Announcements --
+let currentAnnouncements = [];
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function fetchAnnouncements() {
+  const basePath = location.pathname.replace(/\/$/, '');
+  try {
+    const res = await fetch(`${basePath}/api/announcements`);
+    if (!res.ok) throw new Error('fetch failed');
+    const data = await res.json();
+    currentAnnouncements = data.announcements || [];
+  } catch {
+    currentAnnouncements = [];
+  }
+  renderAnnouncementBanner();
+  maybeShowAckModal();
+}
+
+function renderAnnouncementBanner() {
+  const banner = document.getElementById('announcement-banner');
+  if (!banner) return;
+  if (currentAnnouncements.length === 0) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  const canManage = isSupervisor || isSuperAdmin;
+  banner.style.display = '';
+  banner.innerHTML = currentAnnouncements.map((a) => {
+    const created = a.createdAt ? new Date(a.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    const actions = canManage
+      ? `<button class="btn btn-sm btn-outline-secondary announcement-acks-btn" data-id="${a.id}">Ack status</button>
+         <button class="btn btn-sm btn-outline-danger announcement-clear-btn" data-id="${a.id}">Clear</button>`
+      : (a.acknowledgedByMe
+          ? `<span class="announcement-ack-pill">Acknowledged</span>`
+          : `<button class="btn btn-sm btn-warning announcement-ack-btn" data-id="${a.id}">Acknowledge</button>`);
+    return `<div class="announcement-item">
+      <div class="announcement-text">
+        <div class="announcement-title">${escapeHtml(a.title)}</div>
+        <div class="announcement-body">${escapeHtml(a.body)}</div>
+        <div class="announcement-meta">${created}</div>
+      </div>
+      <div class="announcement-actions">${actions}</div>
+    </div>`;
+  }).join('');
+
+  banner.querySelectorAll('.announcement-ack-btn').forEach((btn) => {
+    btn.addEventListener('click', () => ackAnnouncement(btn.dataset.id, btn));
+  });
+  banner.querySelectorAll('.announcement-clear-btn').forEach((btn) => {
+    btn.addEventListener('click', () => clearAnnouncement(btn.dataset.id, btn));
+  });
+  banner.querySelectorAll('.announcement-acks-btn').forEach((btn) => {
+    btn.addEventListener('click', () => showAckStatus(btn.dataset.id));
+  });
+}
+
+function maybeShowAckModal() {
+  if (isSupervisor || isSuperAdmin) return;
+  const unacked = currentAnnouncements.filter((a) => !a.acknowledgedByMe);
+  const modalEl = document.getElementById('announcement-ack-modal');
+  const bodyEl = document.getElementById('announcement-ack-modal-body');
+  const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  if (unacked.length === 0) {
+    bsModal.hide();
+    return;
+  }
+  bodyEl.innerHTML = unacked.map((a) => `
+    <div class="announcement-item mb-2 pb-2 border-bottom">
+      <div class="announcement-text">
+        <div class="announcement-title">${escapeHtml(a.title)}</div>
+        <div class="announcement-body">${escapeHtml(a.body)}</div>
+      </div>
+      <div class="announcement-actions mt-2">
+        <button class="btn btn-sm btn-warning announcement-ack-btn" data-id="${a.id}">Acknowledge</button>
+      </div>
+    </div>`).join('');
+  bodyEl.querySelectorAll('.announcement-ack-btn').forEach((btn) => {
+    btn.addEventListener('click', () => ackAnnouncement(btn.dataset.id, btn));
+  });
+  bsModal.show();
+}
+
+async function ackAnnouncement(id, btn) {
+  const basePath = location.pathname.replace(/\/$/, '');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${basePath}/api/announcements/${id}/ack`, { method: 'POST' });
+    if (!res.ok) throw new Error('ack failed');
+    await fetchAnnouncements();
+  } catch {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function clearAnnouncement(id, btn) {
+  if (!confirm('Clear this announcement? Acknowledgement history will be preserved.')) return;
+  const basePath = location.pathname.replace(/\/$/, '');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${basePath}/api/announcements/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('clear failed');
+    await fetchAnnouncements();
+  } catch {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function showAckStatus(id) {
+  const basePath = location.pathname.replace(/\/$/, '');
+  const modalEl = document.getElementById('announcement-acks-modal');
+  const bodyEl = document.getElementById('announcement-acks-modal-body');
+  const titleEl = document.getElementById('announcement-acks-modal-title');
+  const ann = currentAnnouncements.find((a) => a.id === id);
+  titleEl.textContent = ann ? `Ack Status — ${ann.title}` : 'Ack Status';
+  bodyEl.innerHTML = 'Loading…';
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  try {
+    const res = await fetch(`${basePath}/api/announcements/${id}/acks`);
+    if (!res.ok) throw new Error('fetch failed');
+    const data = await res.json();
+    const ackedList = (data.acknowledged || []).map((u) => `<li>${escapeHtml(u.name)} <span class="text-muted small">${new Date(u.ackedAt).toLocaleString()}</span></li>`).join('');
+    const pendingList = (data.pending || []).map((u) => `<li>${escapeHtml(u.name)}</li>`).join('');
+    bodyEl.innerHTML = `
+      <div class="row">
+        <div class="col-md-6">
+          <h6>Pending (${data.pending?.length || 0})</h6>
+          <ul class="small">${pendingList || '<li class="text-muted">None</li>'}</ul>
+        </div>
+        <div class="col-md-6">
+          <h6>Acknowledged (${data.acknowledged?.length || 0})</h6>
+          <ul class="small">${ackedList || '<li class="text-muted">None</li>'}</ul>
+        </div>
+      </div>`;
+  } catch {
+    bodyEl.innerHTML = '<p class="text-danger">Failed to load ack status.</p>';
+  }
+}
+
+function initAnnouncements() {
+  // Expose role flags for shared announcement helpers.
+  window.isSupervisor = isSupervisor;
+  window.isSuperAdmin = isSuperAdmin;
+  fetchAnnouncements();
+  setInterval(fetchAnnouncements, 30000);
+
+  const postBtn = document.getElementById('announcement-compose-post-btn');
+  const titleInput = document.getElementById('announcement-compose-title');
+  const bodyInput = document.getElementById('announcement-compose-body');
+  const feedback = document.getElementById('announcement-compose-feedback');
+  const composeModalEl = document.getElementById('announcement-compose-modal');
+  composeModalEl.addEventListener('show.bs.modal', () => {
+    titleInput.value = '';
+    bodyInput.value = '';
+    feedback.textContent = '';
+    feedback.className = 'settings-feedback';
+  });
+  postBtn.addEventListener('click', async () => {
+    const title = titleInput.value.trim();
+    const body = bodyInput.value.trim();
+    if (!title || !body) {
+      feedback.textContent = 'Title and body are required.';
+      feedback.className = 'settings-feedback text-danger';
+      return;
+    }
+    const basePath = location.pathname.replace(/\/$/, '');
+    postBtn.disabled = true;
+    feedback.textContent = 'Posting…';
+    feedback.className = 'settings-feedback';
+    try {
+      const res = await fetch(`${basePath}/api/announcements`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body }),
+      });
+      if (!res.ok) throw new Error('post failed');
+      feedback.textContent = 'Posted.';
+      feedback.className = 'settings-feedback text-success';
+      await fetchAnnouncements();
+      setTimeout(() => bootstrap.Modal.getInstance(composeModalEl)?.hide(), 400);
+    } catch {
+      feedback.textContent = 'Failed to post.';
+      feedback.className = 'settings-feedback text-danger';
+    } finally {
+      postBtn.disabled = false;
+    }
+  });
+}
+
+// Update ticking timers every 1 second.
+// Tick paths only touch time-relative cells in place (no innerHTML), so a text
+// selection elsewhere in the table survives — needed so agents can copy/paste
+// names, phone numbers, SF case IDs, etc. Full renders fire on WS push.
+// renderStats / renderRepeatCallers have no ticking content and are intentionally
+// not called here; they redraw on the next WS push.
 setInterval(() => {
-  renderAgents();
-  renderQueue();
+  renderAgentsTick();
+  renderQueueTick();
   renderLive();
   if (!selectedDate) {
-    renderStats();
-    renderCallList();
-    renderRepeatCallers();
+    renderCallListTick();
   }
 }, 1000);
 // Load saved column preferences, then init
