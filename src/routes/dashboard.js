@@ -76,8 +76,13 @@ router.delete('/api/call/:id', requireSupervisor, dashboardController.clearAgent
 router.get('/api/users/flags', requireSupervisor, async (req, res) => {
   try {
     const users = await atp.users.fetchAll({});
+    // super_admins can manage flags on supervisors too; regular supervisors
+    // only see non-supervisor agents. Extension prefix filter (82* = real
+    // agent/supervisor accounts) applies to both, so admin/test accounts
+    // stay hidden.
+    const isSuperAdmin = !!(req.session && req.session.user && req.session.user.superAdmin);
     const list = users
-      .filter((u) => !u.supervisor)
+      .filter((u) => isSuperAdmin || !u.supervisor)
       .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
       .map((u) => {
         const row = {
