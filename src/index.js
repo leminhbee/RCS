@@ -40,6 +40,18 @@ app.use('/auth', require('./routes/auth'));
 const path = require('path');
 const dashboardRouter = require('./routes/dashboard');
 const requireAuth = require('./auth/authMiddleware');
+
+// EJS view engine for shared layout/partials across dashboard pages
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, '../views'));
+
+// Render templated pages (must come before the static handler so they win over any
+// leftover .html files in public/)
+app.get(['/dashboard', '/dashboard/', '/dashboard/index.html'], requireAuth, (req, res) => res.render('index'));
+app.get('/dashboard/reports.html', requireAuth, (req, res) => res.render('reports'));
+app.get('/dashboard/announcements.html', requireAuth, (req, res) => res.render('announcements'));
+
+// Static assets (css, js, images, etc.)
 app.use('/dashboard', requireAuth, express.static(path.join(__dirname, '../public')));
 app.use('/dashboard', requireAuth, dashboardRouter);
 app.get('/', (req, res) => res.redirect('/dashboard'));

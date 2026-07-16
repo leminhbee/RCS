@@ -6,19 +6,6 @@ let agentCallsChart = null;
 let agentTimeChart = null;
 let agentLongChart = null;
 
-// -- Theme toggle --
-const toggle = document.getElementById('theme-toggle');
-const icon = document.getElementById('toggle-icon');
-function applyTheme(dark) {
-  document.body.classList.toggle('dark', dark);
-  icon.innerHTML = dark ? '&#9790;' : '&#9788;';
-  localStorage.setItem('theme', dark ? 'dark' : 'light');
-}
-toggle.addEventListener('click', () => {
-  applyTheme(!document.body.classList.contains('dark'));
-});
-applyTheme(localStorage.getItem('theme') === 'dark');
-
 // -- Helpers --
 function formatSeconds(sec) {
   if (sec == null || sec === 0) return '--';
