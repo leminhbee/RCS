@@ -7,6 +7,7 @@ const websocket = require('../helpers/websocket');
 const { createLogger } = require('../helpers/logger');
 
 const announcementsLogger = createLogger('announcements');
+const trackedIssuesLogger = createLogger('trackedIssues');
 const {
   getVisibilityConfig,
   getPermissions,
@@ -408,6 +409,94 @@ router.get('/api/announcements/:id/acks', requireSupervisor, async (req, res) =>
     res.json({ acknowledged, pending });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch announcement acks' });
+  }
+});
+
+
+// -------- Tracked issues --------
+// Fields accepted in create/update (mirrors ATP whitelist minus id/timestamps/createdBy).
+const TRACKED_ISSUE_FIELDS = [
+  'summary',
+  'incidentDate',
+  'severity',
+  'status',
+  'description',
+  'dealerInfo',
+  'whatToLookFor',
+];
+
+function pickTrackedIssueFields(body) {
+  const out = {};
+  for (const k of TRACKED_ISSUE_FIELDS) {
+    if (k in body) out[k] = body[k];
+  }
+  return out;
+}
+
+// Active only. Anyone signed in can read; the ticker is gated at the UI layer
+// by the user's tracked_issues_ticker flag.
+router.get('/api/tracked-issues', async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({ active: true });
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+// All (active + resolved) — supervisors only, for the management page.
+router.get('/api/tracked-issues/all', requireSupervisor, async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({});
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+router.post('/api/tracked-issues', requireSupervisor, async (req, res) => {
+  const fields = pickTrackedIssueFields(req.body || {});
+  const summary = String(fields.summary || '').trim();
+  if (!summary) return res.status(400).json({ error: 'summary is required' });
+  if (summary.length > 200) return res.status(400).json({ error: 'summary must be 200 chars or fewer' });
+  fields.summary = summary;
+  try {
+    const created = await atp.trackedIssues.create({
+      ...fields,
+      createdBy: req.session.user.id,
+    });
+    // Fire-and-forget Slack canvas append.
+    ava.trackedIssues
+      .post({ ...fields, createdByName: userDisplayName(req.session.user) })
+      .catch((err) => trackedIssuesLogger.error({ err: err.message }, 'AVA tracked-issue post failed'));
+    websocket.broadcast().catch(() => {});
+    res.json(created);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create tracked issue' });
+  }
+});
+
+router.patch('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  const patch = pickTrackedIssueFields(req.body || {});
+  if ('active' in (req.body || {})) patch.active = !!req.body.active;
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+  try {
+    const updated = await atp.trackedIssues.update(req.params.id, patch);
+    websocket.broadcast().catch(() => {});
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update tracked issue' });
+  }
+});
+
+// Soft-close by flipping active=false (matches the announcements clear pattern).
+router.delete('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  try {
+    await atp.trackedIssues.update(req.params.id, { active: false });
+    websocket.broadcast().catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to close tracked issue' });
   }
 });
 

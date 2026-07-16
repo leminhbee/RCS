@@ -589,6 +589,8 @@ async function init() {
     initAnnouncements();
     if (isSupervisor || isSuperAdmin) {
       document.getElementById('announcement-menu').style.display = '';
+      const tim = document.getElementById('tracked-issue-menu');
+      if (tim) tim.style.display = '';
     }
 
     // SuperAdmin settings menu item
@@ -762,6 +764,7 @@ function connectWebSocket() {
     } catch (e) {
       console.error('Failed to parse WebSocket message:', e);
     }
+    window.dispatchEvent(new CustomEvent('rcs:ws-update'));
   });
 
   ws.addEventListener('close', () => {

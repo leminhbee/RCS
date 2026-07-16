@@ -4,4 +4,5 @@ module.exports = {
   queue: require('./queue'),
   outbound: require('./outbound'),
   announcements: require('./announcements'),
+  trackedIssues: require('./trackedIssues'),
 };

@@ -12,6 +12,7 @@ const USER_FLAGS = [
   { key: 'deviceAdmin',          label: 'Device Admin',          description: 'Grants access to the device status fixing tool in AVA (Slack command).' },
   { key: 'startTransferRequest', label: 'Start Transfer Request', description: 'May initiate transfer requests.' },
   { key: 'breaksEnabled',        label: 'Breaks Enabled',        description: 'Records breaks with reminders + late tracking.' },
+  { key: 'trackedIssuesTicker',  label: 'Tracked Issues Ticker',  description: 'Shows the tracked-issues ticker across the top of every dashboard page.' },
 ];
 
 const USER_FLAG_KEYS = USER_FLAGS.map((f) => f.key);

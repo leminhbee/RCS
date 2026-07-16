@@ -11,6 +11,8 @@
 <body>
 
   <%- include('partials/topbar', { pageName: 'Announcements' }) %>
+  <%- include('partials/issues-ticker') %>
+  <%- include('partials/tracked-issue-modals') %>
 
   <div class="container py-3" style="max-width: 1100px;">
 
@@ -61,6 +63,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/dashboard/topbar.js"></script>
+  <script src="/dashboard/issues-ticker.js"></script>
+  <script src="/dashboard/tracked-issues-compose.js"></script>
   <script src="/dashboard/announcements-shared.js"></script>
   <script src="/dashboard/announcements.js"></script>
 </body>

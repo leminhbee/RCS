@@ -491,3 +491,61 @@ body.dark .user-flags-tabs .nav-link.active { color: #f0f2f3; background: #13213
 .preferences-hint { color: #6b7280; font-size: 0.8rem; margin-top: 6px; }
 body.dark .preferences-row { border-bottom-color: #2a3f55; }
 body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
+
+/* ---------- Tracked issues ticker ---------- */
+.issues-ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  border-bottom: 1px solid #fecaca;
+  font-size: 0.9rem;
+  padding: 6px 12px;
+  position: sticky;
+  top: 48px; /* sits directly under the topbar (topbar height is ~48px) */
+  z-index: 30;
+}
+.issues-ticker-label {
+  font-weight: 600;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.issues-ticker-viewport {
+  flex: 1 1 auto;
+  overflow: hidden;
+  position: relative;
+}
+.issues-ticker-track {
+  display: inline-block;
+  white-space: nowrap;
+  animation: ticker-scroll 60s linear infinite;
+  will-change: transform;
+}
+.issues-ticker:hover .issues-ticker-track,
+.issues-ticker:focus-within .issues-ticker-track {
+  animation-play-state: paused;
+}
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.issue-chip {
+  display: inline-block;
+  padding: 0 8px;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.issue-chip:hover, .issue-chip:focus { text-decoration: underline; outline: none; }
+.issue-chip-sep { display: inline-block; padding: 0 6px; opacity: 0.5; }
+
+body.dark .issues-ticker { background: #3a1616; color: #fecaca; border-bottom-color: #5a2020; }
+
+/* ---------- Tracked issue details modal ---------- */
+.tracked-issue-details-row { padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
+.tracked-issue-details-row:last-child { border-bottom: none; }
+.tracked-issue-details-label { font-weight: 600; margin-bottom: 4px; color: #6b7280; font-size: 0.85rem; }
+.tracked-issue-details-value { white-space: pre-wrap; }
+body.dark .tracked-issue-details-row { border-bottom-color: #2a3f55; }
+body.dark .tracked-issue-details-label { color: #8899aa; }

@@ -1,0 +1,11 @@
+<%
+// Renders the tracked-issues ticker bar. Hidden by default; issues-ticker.js
+// reveals it only if the current user has the trackedIssuesTicker flag AND
+// there is at least one active tracked issue.
+%>
+<div id="issues-ticker" class="issues-ticker" style="display:none" role="region" aria-label="Tracked issues">
+  <span class="issues-ticker-label"><span aria-hidden="true">&#9888;</span> Tracked Issues</span>
+  <div class="issues-ticker-viewport">
+    <div class="issues-ticker-track" id="issues-ticker-track"></div>
+  </div>
+</div>
