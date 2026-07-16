@@ -238,6 +238,39 @@ router.get('/api/settings/channels', async (req, res) => {
 
 router.put('/api/settings/channels', async (req, res) => {
   if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+
+// Tracked-issues ticker loop duration (seconds). Global setting; read by all
+// clients so the marquee speed stays in sync. Only super_admins can change it.
+router.get('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  try {
+    const setting = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    const raw = setting && setting.value;
+    const value = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    const seconds = Number.isFinite(value.seconds) ? value.seconds : 60;
+    res.json({ seconds, defaultSeconds: 60 });
+  } catch {
+    res.status(500).json({ error: 'Failed to load ticker speed setting' });
+  }
+});
+
+router.put('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const n = Number(req.body?.seconds);
+  if (!Number.isFinite(n) || n < 5 || n > 600 || Math.floor(n) !== n) {
+    return res.status(400).json({ error: 'seconds must be an integer between 5 and 600' });
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: JSON.stringify({ seconds: n }) });
+    } else {
+      await atp.settings.create({ key: 'tracked-issues-ticker-speed', value: JSON.stringify({ seconds: n }) });
+    }
+    res.json({ seconds: n });
+  } catch {
+    res.status(500).json({ error: 'Failed to save ticker speed' });
+  }
+});
   const incoming = req.body?.channels;
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
     return res.status(400).json({ error: 'channels must be an object' });

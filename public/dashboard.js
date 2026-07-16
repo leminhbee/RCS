@@ -810,14 +810,16 @@ async function initSettingsPanel() {
   let userList = [];
   let featureTiers = {};
   let bufferMin = 2;
+  let tickerSeconds = 60;
   // Channels stored as an array to preserve display order and allow duplicate-name detection while editing.
   let channels = [];
 
   try {
-    const [visRes, bufRes, chanRes] = await Promise.all([
+    const [visRes, bufRes, chanRes, tickerRes] = await Promise.all([
       fetch(`${basePath}/api/settings/visibility`),
       fetch(`${basePath}/api/settings/breakLateBuffer`),
       fetch(`${basePath}/api/settings/channels`),
+      fetch(`${basePath}/api/settings/trackedIssuesTickerSpeed`),
     ]);
     const data = await visRes.json();
     config = data.config || {};
@@ -830,6 +832,10 @@ async function initSettingsPanel() {
     if (chanRes.ok) {
       const chanData = await chanRes.json();
       channels = Object.entries(chanData.channels || {}).map(([name, id]) => ({ name, id }));
+    }
+    if (tickerRes && tickerRes.ok) {
+      const tickerData = await tickerRes.json();
+      if (Number.isFinite(tickerData.seconds)) tickerSeconds = tickerData.seconds;
     }
   } catch {
     body.innerHTML = '<p class="p-3 text-danger">Failed to load settings.</p>';
@@ -895,6 +901,14 @@ async function initSettingsPanel() {
           <span class="preferences-unit">min</span>
         </div>
         <div class="preferences-hint">After a break exceeds its time limit, wait this many minutes before sending Slack notifications. Lateness is still recorded at the limit.</div>
+      </div>
+      <div class="settings-feature-row">
+        <div class="settings-feature-label">Tracked Issues Ticker Loop Duration</div>
+        <div class="preferences-input-wrap">
+          <input type="number" min="5" max="600" step="1" class="form-control form-control-sm" id="settings-ticker-input" value="${tickerSeconds}">
+          <span class="preferences-unit">sec</span>
+        </div>
+        <div class="preferences-hint">Seconds for one full ticker loop across the screen. Lower = faster. Default 60. Changes take effect on next page load.</div>
       </div>
     `;
     for (const [key, label] of Object.entries(FEATURE_LABELS)) {
@@ -1006,7 +1020,9 @@ async function initSettingsPanel() {
     }
 
     try {
-      const [visRes, bufRes, chanRes] = await Promise.all([
+      const tickerInput = document.getElementById('settings-ticker-input');
+      const tickerVal = Number(tickerInput && tickerInput.value);
+      const [visRes, bufRes, chanRes, tickerRes] = await Promise.all([
         fetch(`${basePath}/api/settings/visibility`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1022,8 +1038,13 @@ async function initSettingsPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ channels: channelsPayload }),
         }),
+        fetch(`${basePath}/api/settings/trackedIssuesTickerSpeed`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seconds: tickerVal }),
+        }),
       ]);
-      if (!visRes.ok || !bufRes.ok || !chanRes.ok) throw new Error('Save failed');
+      if (!visRes.ok || !bufRes.ok || !chanRes.ok || !tickerRes.ok) throw new Error('Save failed');
       feedback.textContent = 'Saved! Reload the page to see changes.';
       feedback.className = 'settings-feedback text-success';
     } catch {

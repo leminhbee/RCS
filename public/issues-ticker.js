@@ -99,12 +99,26 @@
     if (chip) { e.preventDefault(); openDetails(chip.dataset.id); }
   });
 
+
+  async function applyTickerSpeed() {
+    try {
+      const res = await fetch(`${basePath}/api/settings/trackedIssuesTickerSpeed`);
+      if (!res.ok) return; // fall back to CSS default (60s)
+      const data = await res.json();
+      const seconds = Number(data && data.seconds);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        track.style.animationDuration = seconds + 's';
+      }
+    } catch { /* keep default */ }
+  }
+
   async function init() {
     try {
       const meRes = await fetch(`${basePath}/api/me`);
       if (!meRes.ok) return;
       const me = await meRes.json();
       if (!me || !me.trackedIssuesTicker) return; // per-user gate
+      await applyTickerSpeed();
       await refresh();
       // Refresh when the websocket says something changed. dashboard.js also
       // reacts to WS pushes for its own rendering; we piggyback via a custom
