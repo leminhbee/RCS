@@ -78,6 +78,7 @@ const fetchDashboardData = async (date) => {
       return true;
     })
     .map((u) => ({
+      id: u.id,
       name: `${u.nameFirst} ${u.nameLast}`,
       status: u.currentStatus,
       statusSince: u.statusSince,
