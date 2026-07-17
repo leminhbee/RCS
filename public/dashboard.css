@@ -497,6 +497,8 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
   background: #fef2f2;
   color: #7f1d1d;
   border-bottom: 1px solid #fecaca;
