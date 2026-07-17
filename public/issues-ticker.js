@@ -31,25 +31,13 @@
     const chips = list
       .map((i) => `<span class="issue-chip" data-id="${escapeHtml(i.id)}" role="button" tabindex="0">${escapeHtml(i.summary)}</span>`)
       .join(sep);
-    // Reveal first so we can measure real widths.
-    container.style.display = '';
-    // Render a single copy, measure its width, and figure out how many copies
-    // are needed so the total track is at least 2x the viewport width. That
-    // guarantees the animation -50% shift moves by at least one full viewport
-    // — long enough that the visible area is never empty as it loops.
     track.innerHTML = chips;
-    const groupWidth = track.scrollWidth || 1;
-    const viewportWidth = viewport.clientWidth || 1;
-    let copies = Math.max(2, Math.ceil((viewportWidth * 2) / groupWidth));
-    if (copies % 2 !== 0) copies++; // keep it even so -50% cleanly bisects the track
-    const groups = new Array(copies).fill(chips);
-    track.innerHTML = groups.join(sep);
-    // Scale animation-duration so px/sec stays constant regardless of copies.
-    // -50% of the track equals (copies/2) * groupWidth px of shift; the user
-    // setting is defined as "seconds per viewport-width" so we scale to that.
-    const shiftPx = (copies / 2) * groupWidth;
-    const durationSec = tickerSpeedSeconds * (shiftPx / viewportWidth);
-    track.style.animationDuration = durationSec + 's';
+    container.style.display = '';
+    // padding-left:100% on the track (in CSS) starts the content off-screen
+    // right; the -100% translate then walks it fully off the left. On loop
+    // it re-enters from the right — a natural single-pass marquee, no
+    // content duplication.
+    track.style.animationDuration = tickerSpeedSeconds + 's';
   }
 
   async function refresh() {

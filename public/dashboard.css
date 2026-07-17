@@ -527,6 +527,7 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
 .issues-ticker-track {
   display: inline-block;
   white-space: nowrap;
+  padding-left: 100%; /* start content off-screen right */
   animation: ticker-scroll 60s linear infinite;
   will-change: transform;
 }
@@ -536,7 +537,7 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
 }
 @keyframes ticker-scroll {
   from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
+  to   { transform: translateX(-100%); }
 }
 .issue-chip {
   display: inline-block;
