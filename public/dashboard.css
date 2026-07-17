@@ -494,19 +494,24 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
 
 /* ---------- Tracked issues ticker ---------- */
 .issues-ticker {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: block;
   width: 100%;
   box-sizing: border-box;
   background: #fef2f2;
   color: #7f1d1d;
   border-bottom: 1px solid #fecaca;
   font-size: 0.9rem;
-  padding: 6px 12px;
   position: sticky;
   top: 48px; /* sits directly under the topbar (topbar height is ~48px) */
   z-index: 30;
+}
+.issues-ticker-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .issues-ticker-label {
   font-weight: 600;
