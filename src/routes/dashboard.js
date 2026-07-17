@@ -238,6 +238,32 @@ router.get('/api/settings/channels', async (req, res) => {
 
 router.put('/api/settings/channels', async (req, res) => {
   if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const incoming = req.body?.channels;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return res.status(400).json({ error: 'channels must be an object' });
+  }
+  const cleaned = {};
+  for (const [rawName, rawId] of Object.entries(incoming)) {
+    const name = String(rawName || '').trim();
+    const id = String(rawId ?? '').trim();
+    if (!name || !id) return res.status(400).json({ error: 'Every channel needs a name and an id' });
+    if (Object.prototype.hasOwnProperty.call(cleaned, name)) {
+      return res.status(400).json({ error: `Duplicate channel name: ${name}` });
+    }
+    cleaned[name] = id;
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'channels' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: cleaned });
+    } else {
+      await atp.settings.create({ key: 'channels', value: cleaned });
+    }
+    res.json({ channels: cleaned });
+  } catch {
+    res.status(500).json({ error: 'Failed to save channels' });
+  }
+});
 
 // Tracked-issues ticker loop duration (seconds). Global setting; read by all
 // clients so the marquee speed stays in sync. Only super_admins can change it.
@@ -269,32 +295,6 @@ router.put('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
     res.json({ seconds: n });
   } catch {
     res.status(500).json({ error: 'Failed to save ticker speed' });
-  }
-});
-  const incoming = req.body?.channels;
-  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
-    return res.status(400).json({ error: 'channels must be an object' });
-  }
-  const cleaned = {};
-  for (const [rawName, rawId] of Object.entries(incoming)) {
-    const name = String(rawName || '').trim();
-    const id = String(rawId ?? '').trim();
-    if (!name || !id) return res.status(400).json({ error: 'Every channel needs a name and an id' });
-    if (Object.prototype.hasOwnProperty.call(cleaned, name)) {
-      return res.status(400).json({ error: `Duplicate channel name: ${name}` });
-    }
-    cleaned[name] = id;
-  }
-  try {
-    const existing = await atp.settings.fetchOne({ key: 'channels' });
-    if (existing) {
-      await atp.settings.update(existing.id, { value: cleaned });
-    } else {
-      await atp.settings.create({ key: 'channels', value: cleaned });
-    }
-    res.json({ channels: cleaned });
-  } catch {
-    res.status(500).json({ error: 'Failed to save channels' });
   }
 });
 
