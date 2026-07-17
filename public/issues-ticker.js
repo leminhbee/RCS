@@ -9,6 +9,8 @@
   const container = document.getElementById('issues-ticker');
   const track = document.getElementById('issues-ticker-track');
   if (!container || !track) return;
+  const viewport = track.parentElement;
+  let tickerSpeedSeconds = 60; // seconds per one viewport-width of scroll
 
   function escapeHtml(s) {
     return String(s == null ? '' : s)
@@ -25,12 +27,29 @@
       track.innerHTML = '';
       return;
     }
+    const sep = '<span class="issue-chip-sep" aria-hidden="true">&bull;</span>';
     const chips = list
       .map((i) => `<span class="issue-chip" data-id="${escapeHtml(i.id)}" role="button" tabindex="0">${escapeHtml(i.summary)}</span>`)
-      .join('<span class="issue-chip-sep" aria-hidden="true">&bull;</span>');
-    // Duplicate for a seamless marquee loop (the CSS translates by -50%).
-    track.innerHTML = chips + '<span class="issue-chip-sep" aria-hidden="true">&bull;</span>' + chips;
+      .join(sep);
+    // Reveal first so we can measure real widths.
     container.style.display = '';
+    // Render a single copy, measure its width, and figure out how many copies
+    // are needed so the total track is at least 2x the viewport width. That
+    // guarantees the animation -50% shift moves by at least one full viewport
+    // — long enough that the visible area is never empty as it loops.
+    track.innerHTML = chips;
+    const groupWidth = track.scrollWidth || 1;
+    const viewportWidth = viewport.clientWidth || 1;
+    let copies = Math.max(2, Math.ceil((viewportWidth * 2) / groupWidth));
+    if (copies % 2 !== 0) copies++; // keep it even so -50% cleanly bisects the track
+    const groups = new Array(copies).fill(chips);
+    track.innerHTML = groups.join(sep);
+    // Scale animation-duration so px/sec stays constant regardless of copies.
+    // -50% of the track equals (copies/2) * groupWidth px of shift; the user
+    // setting is defined as "seconds per viewport-width" so we scale to that.
+    const shiftPx = (copies / 2) * groupWidth;
+    const durationSec = tickerSpeedSeconds * (shiftPx / viewportWidth);
+    track.style.animationDuration = durationSec + 's';
   }
 
   async function refresh() {
@@ -100,16 +119,14 @@
   });
 
 
-  async function applyTickerSpeed() {
+  async function loadTickerSpeed() {
     try {
       const res = await fetch(`${basePath}/api/settings/trackedIssuesTickerSpeed`);
-      if (!res.ok) return; // fall back to CSS default (60s)
+      if (!res.ok) return;
       const data = await res.json();
       const seconds = Number(data && data.seconds);
-      if (Number.isFinite(seconds) && seconds > 0) {
-        track.style.animationDuration = seconds + 's';
-      }
-    } catch { /* keep default */ }
+      if (Number.isFinite(seconds) && seconds > 0) tickerSpeedSeconds = seconds;
+    } catch { /* keep default 60 */ }
   }
 
   async function init() {
@@ -118,12 +135,16 @@
       if (!meRes.ok) return;
       const me = await meRes.json();
       if (!me || !me.trackedIssuesTicker) return; // per-user gate
-      await applyTickerSpeed();
+      await loadTickerSpeed();
       await refresh();
-      // Refresh when the websocket says something changed. dashboard.js also
-      // reacts to WS pushes for its own rendering; we piggyback via a custom
-      // event dispatched on every WS message.
       window.addEventListener('rcs:ws-update', refresh);
+      // Re-run the copy math on resize so the ticker still fills the viewport
+      // when the window changes size.
+      let resizeTimer = null;
+      window.addEventListener('resize', () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(refresh, 150);
+      });
     } catch (err) {
       console.warn('issues-ticker: init failed', err);
     }
