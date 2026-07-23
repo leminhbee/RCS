@@ -498,10 +498,11 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
   width: 100vw;
   box-sizing: border-box;
   margin-left: calc(50% - 50vw);
-  background: #fef2f2;
-  color: #7f1d1d;
-  border-bottom: 1px solid #fecaca;
+  background: #fef3c7;
+  color: #7c2d12;
+  border-bottom: 2px solid #f59e0b;
   font-size: 0.9rem;
+  font-weight: 500;
   position: sticky;
   top: 48px; /* sits directly under the topbar (topbar height is ~48px) */
   z-index: 30;
@@ -515,9 +516,16 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
   box-sizing: border-box;
 }
 .issues-ticker-label {
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   flex: 0 0 auto;
+  background: #b91c1c;
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 .issues-ticker-viewport {
   flex: 1 1 auto;
@@ -531,8 +539,7 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
   animation: ticker-scroll 60s linear infinite;
   will-change: transform;
 }
-.issues-ticker:hover .issues-ticker-track,
-.issues-ticker:focus-within .issues-ticker-track {
+.issues-ticker:hover .issues-ticker-track {
   animation-play-state: paused;
 }
 @keyframes ticker-scroll {
@@ -545,11 +552,15 @@ body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
   cursor: pointer;
   text-decoration: none;
   color: inherit;
+  font-weight: 600;
 }
-.issue-chip:hover, .issue-chip:focus { text-decoration: underline; outline: none; }
-.issue-chip-sep { display: inline-block; padding: 0 6px; opacity: 0.5; }
+.issue-chip:hover, .issue-chip:focus { color: #7f1d1d; text-decoration: underline; outline: none; }
+.issue-chip-sep { display: inline-block; padding: 0 6px; color: #b45309; opacity: 0.6; }
 
-body.dark .issues-ticker { background: #3a1616; color: #fecaca; border-bottom-color: #5a2020; }
+body.dark .issues-ticker { background: #3a1616; color: #fecaca; border-bottom-color: #dc2626; }
+body.dark .issues-ticker-label { background: #7f1d1d; color: #ffffff; }
+body.dark .issue-chip:hover, body.dark .issue-chip:focus { color: #ffffff; }
+body.dark .issue-chip-sep { color: #fca5a5; }
 
 /* ---------- Tracked issue details modal ---------- */
 .tracked-issue-details-row { padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
@@ -558,3 +569,173 @@ body.dark .issues-ticker { background: #3a1616; color: #fecaca; border-bottom-co
 .tracked-issue-details-value { white-space: pre-wrap; }
 body.dark .tracked-issue-details-row { border-bottom-color: #2a3f55; }
 body.dark .tracked-issue-details-label { color: #8899aa; }
+
+/* ---------- Tracked issues management page ---------- */
+.tracked-issue-card {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.tracked-issue-card.cleared { opacity: 0.7; }
+.tracked-issue-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tracked-issue-summary { font-weight: 600; font-size: 1rem; }
+.tracked-issue-meta { color: #6b7280; font-size: 0.85rem; margin-top: 4px; }
+.tracked-issue-body { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+.tracked-issue-actions { display: flex; gap: 6px; margin-top: 10px; }
+body.dark .tracked-issue-card { background: #132133; border-color: #1a2d42; color: #f0f2f3; }
+body.dark .tracked-issue-meta { color: #8899aa; }
+body.dark .tracked-issue-body { border-top-color: #1a2d42; }
+
+/* ---------- Emoji picker popup (tracked-issue-emoji-picker.js) ---------- */
+.rcs-emoji-picker {
+  position: absolute;
+  z-index: 2000;
+  width: 300px;
+  max-height: 320px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rcs-emoji-picker-search {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+.rcs-emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 260px;
+}
+.rcs-emoji-picker-btn {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.2rem;
+  border-radius: 3px;
+  line-height: 1;
+}
+.rcs-emoji-picker-btn:hover { background: #f3f4f6; }
+body.dark .rcs-emoji-picker { background: #132133; border-color: #1a2d42; }
+body.dark .rcs-emoji-picker-search { background: #0e1a2b; border-color: #1a2d42; color: #f0f2f3; }
+body.dark .rcs-emoji-picker-btn:hover { background: #1a2d42; }
+
+/* ---------- EasyMDE dark-mode + width overrides ---------- */
+.EasyMDEContainer { max-width: 100%; box-sizing: border-box; }
+.EasyMDEContainer .CodeMirror { max-width: 100%; box-sizing: border-box; }
+body.dark .EasyMDEContainer .CodeMirror {
+  background: #0e1a2b;
+  color: #f0f2f3;
+  border-color: #1a2d42;
+}
+body.dark .EasyMDEContainer .CodeMirror-cursor { border-left-color: #f0f2f3; }
+body.dark .EasyMDEContainer .editor-toolbar {
+  background: #132133;
+  border-color: #1a2d42;
+}
+body.dark .EasyMDEContainer .editor-toolbar button {
+  color: #d0d5da !important;
+}
+body.dark .EasyMDEContainer .editor-toolbar button:hover,
+body.dark .EasyMDEContainer .editor-toolbar button.active {
+  background: #1a2d42;
+  border-color: #2a3f55;
+}
+body.dark .EasyMDEContainer .editor-toolbar i.separator { border-color: #2a3f55; }
+body.dark .EasyMDEContainer .editor-preview,
+body.dark .EasyMDEContainer .editor-preview-side {
+  background: #0e1a2b;
+  color: #f0f2f3;
+  border-color: #1a2d42;
+}
+body.dark .EasyMDEContainer .editor-statusbar { color: #8899aa; }
+body.dark .EasyMDEContainer .CodeMirror-selected { background: #223a55 !important; }
+
+/* Render lists inside details values so marked's output doesn't inherit
+   pre-wrap whitespace (which would introduce ugly blank lines). */
+.tracked-issue-details-value ul,
+.tracked-issue-details-value ol { margin: 4px 0 4px 20px; }
+.tracked-issue-details-value p { margin: 0 0 6px; }
+.tracked-issue-details-value p:last-child { margin-bottom: 0; }
+.tracked-issue-details-value code {
+  background: #f3f4f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+body.dark .tracked-issue-details-value code { background: #1a2d42; }
+
+/* Markdown-rendered announcement bodies: block elements handle their own
+   spacing, so drop pre-wrap (which would show blank lines between them). */
+.announcement-banner .announcement-body,
+.announcement-list-item .ann-body { white-space: normal; }
+.announcement-banner .announcement-body p,
+.announcement-list-item .ann-body p { margin: 0 0 6px; }
+.announcement-banner .announcement-body p:last-child,
+.announcement-list-item .ann-body p:last-child { margin-bottom: 0; }
+.announcement-banner .announcement-body ul,
+.announcement-banner .announcement-body ol,
+.announcement-list-item .ann-body ul,
+.announcement-list-item .ann-body ol { margin: 4px 0 4px 20px; }
+.announcement-banner .announcement-body code,
+.announcement-list-item .ann-body code {
+  background: #f3f4f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+body.dark .announcement-banner .announcement-body code,
+body.dark .announcement-list-item .ann-body code { background: #1a2d42; }
+
+/* Fix Incoming state — green text in the amber ticker so the chip stands
+   apart from red/open issues without breaking the marquee flow. */
+.issue-chip[data-state="fix_incoming"] {
+  color: #166534;
+}
+.issue-chip[data-state="fix_incoming"]:hover,
+.issue-chip[data-state="fix_incoming"]:focus {
+  color: #14532d;
+}
+body.dark .issue-chip[data-state="fix_incoming"] {
+  color: #4ade80;
+}
+body.dark .issue-chip[data-state="fix_incoming"]:hover,
+body.dark .issue-chip[data-state="fix_incoming"]:focus {
+  color: #86efac;
+}
+
+/* State badges on the Tracked Issues management page cards. */
+.state-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.state-badge.state-open { background: #fee2e2; color: #991b1b; }
+.state-badge.state-fix-incoming { background: #dcfce7; color: #166534; }
+.state-badge.state-resolved { background: #e5e7eb; color: #4b5563; }
+body.dark .state-badge.state-open { background: #3a1616; color: #fecaca; }
+body.dark .state-badge.state-fix-incoming { background: #14432a; color: #86efac; }
+body.dark .state-badge.state-resolved { background: #1f2937; color: #9ca3af; }

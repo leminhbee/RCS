@@ -8,6 +8,16 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function renderMarkdown(v) {
+    if (v == null || v === '') return '';
+    const emojied = window.rcsEmojiPicker
+      ? window.rcsEmojiPicker.renderEmojisInText(String(v))
+      : String(v);
+    if (window.marked && typeof window.marked.parse === 'function') {
+      return window.marked.parse(emojied, { breaks: true, gfm: true });
+    }
+    return escapeHtml(emojied);
+  }
 
   function basePath() {
     // Both /dashboard and /dashboard/announcements.html sit under /dashboard.
@@ -59,7 +69,7 @@
           </div>
           <div>${clearBtn}</div>
         </div>
-        <div class="ann-body">${escapeHtml(a.body)}</div>
+        <div class="ann-body">${renderMarkdown(a.body)}</div>
         ${supDetails}
       </div>`;
     }).join('');
@@ -125,6 +135,39 @@
     const feedback = document.getElementById(feedbackId);
     const modalEl = document.getElementById(modalId);
     if (!postBtn || !titleInput || !bodyInput || !modalEl) return;
+    // Guard against double-init when both the shared announcement-compose.js
+    // and the announcements-page IIFE call this. First caller wins.
+    if (modalEl.dataset.rcsComposeInit === '1') return;
+    modalEl.dataset.rcsComposeInit = '1';
+
+    // EasyMDE editor for the body textarea, mounted on modal-show and
+    // torn down on modal-hide so the underlying textarea stays clean.
+    let editor = null;
+    function makeEmojiButton() {
+      return {
+        name: 'emoji',
+        className: 'fa fa-smile-o rcs-emoji-toolbar-btn',
+        title: 'Emoji',
+        action: (ed) => {
+          const btn = modalEl.querySelector('.rcs-emoji-toolbar-btn');
+          if (window.rcsEmojiPicker && btn) window.rcsEmojiPicker.show(btn, ed);
+        },
+      };
+    }
+    function makeCheckListButton() {
+      return {
+        name: 'check-list',
+        className: 'fa fa-check-square-o',
+        title: 'Check list',
+        action: (ed) => {
+          const cm = ed.codemirror;
+          const line = cm.getCursor().line;
+          const text = cm.getLine(line);
+          cm.replaceRange('- [ ] ' + text, { line, ch: 0 }, { line, ch: text.length });
+          cm.focus();
+        },
+      };
+    }
 
     modalEl.addEventListener('show.bs.modal', () => {
       titleInput.value = '';
@@ -133,11 +176,35 @@
         feedback.textContent = '';
         feedback.className = 'settings-feedback';
       }
+      setTimeout(() => {
+        if (editor || typeof EasyMDE === 'undefined') return;
+        editor = new EasyMDE({
+          element: bodyInput,
+          spellChecker: false,
+          status: false,
+          minHeight: '100px',
+          autoDownloadFontAwesome: true,
+          toolbar: [
+            'bold', 'italic', 'strikethrough', '|',
+            'unordered-list', 'ordered-list', makeCheckListButton(), '|',
+            'code', 'quote', 'link', '|',
+            makeEmojiButton(), '|',
+            'preview',
+          ],
+        });
+      }, 0);
+    });
+    modalEl.addEventListener('hidden.bs.modal', () => {
+      if (editor) {
+        try { editor.toTextArea(); } catch {}
+        editor = null;
+      }
+      if (window.rcsEmojiPicker) window.rcsEmojiPicker.hide();
     });
 
     postBtn.addEventListener('click', async () => {
       const title = titleInput.value.trim();
-      const body = bodyInput.value.trim();
+      const body = (editor ? (editor.value() || '') : bodyInput.value).trim();
       if (!title || !body) {
         if (feedback) {
           feedback.textContent = 'Title and body are required.';
