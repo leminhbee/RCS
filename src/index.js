@@ -50,6 +50,7 @@ app.set('views', path.join(__dirname, '../views'));
 app.get(['/dashboard', '/dashboard/', '/dashboard/index.html'], requireAuth, (req, res) => res.render('index'));
 app.get('/dashboard/reports.html', requireAuth, (req, res) => res.render('reports'));
 app.get('/dashboard/announcements.html', requireAuth, (req, res) => res.render('announcements'));
+app.get('/dashboard/tracked-issues.html', requireAuth, (req, res) => res.render('tracked-issues'));
 
 // Static assets (css, js, images, etc.)
 app.use('/dashboard', requireAuth, express.static(path.join(__dirname, '../public')));

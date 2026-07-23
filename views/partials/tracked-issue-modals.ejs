@@ -30,6 +30,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        <input type="hidden" id="tracked-issue-edit-id" value="">
         <div class="mb-2">
           <label class="form-label" for="tracked-issue-summary">Issue Summary <span class="text-danger">*</span></label>
           <input class="form-control" id="tracked-issue-summary" maxlength="200" placeholder="Short one-line summary shown in the ticker">
@@ -48,6 +49,14 @@
               <option value="3">3</option>
               <option value="4">4</option>
               <option value="5">5</option>
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label" for="tracked-issue-state">State</label>
+            <select class="form-select" id="tracked-issue-state">
+              <option value="open">Open</option>
+              <option value="fix_incoming">Fix Incoming</option>
+              <option value="resolved">Resolved</option>
             </select>
           </div>
         </div>

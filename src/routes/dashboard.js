@@ -461,7 +461,9 @@ const TRACKED_ISSUE_FIELDS = [
   'description',
   'dealerInfo',
   'whatToLookFor',
+  'state',
 ];
+const TRACKED_ISSUE_STATES = new Set(['open', 'fix_incoming', 'resolved']);
 
 function pickTrackedIssueFields(body) {
   const out = {};
@@ -483,12 +485,30 @@ router.get('/api/tracked-issues', async (req, res) => {
 });
 
 // All (active + resolved) — supervisors only, for the management page.
-router.get('/api/tracked-issues/all', requireSupervisor, async (req, res) => {
+// The management page is available to any user with the trackedIssuesTicker
+// flag (matches the ticker's per-user gate); supervisors and super_admins
+// keep access unconditionally.
+router.get('/api/tracked-issues/all', (req, res, next) => {
+  const u = req.session && req.session.user;
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  if (u.trackedIssuesTicker || u.supervisor || u.superAdmin) return next();
+  return res.status(403).json({ error: 'Forbidden' });
+}, async (req, res) => {
   try {
     const list = await atp.trackedIssues.fetchAll({});
     res.json({ trackedIssues: list || [] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+router.get('/api/tracked-issues/:id', async (req, res) => {
+  try {
+    const issue = await atp.trackedIssues.fetchOne(req.params.id);
+    if (!issue) return res.status(404).json({ error: 'Tracked issue not found' });
+    res.json(issue);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issue' });
   }
 });
 
@@ -498,14 +518,33 @@ router.post('/api/tracked-issues', requireSupervisor, async (req, res) => {
   if (!summary) return res.status(400).json({ error: 'summary is required' });
   if (summary.length > 200) return res.status(400).json({ error: 'summary must be 200 chars or fewer' });
   fields.summary = summary;
+  if (fields.state && !TRACKED_ISSUE_STATES.has(fields.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  if (fields.state) fields.active = fields.state !== 'resolved';
   try {
     const created = await atp.trackedIssues.create({
       ...fields,
       createdBy: req.session.user.id,
     });
-    // Fire-and-forget Slack canvas append.
+    // Async: append to the Slack canvas AND persist the returned sectionId
+    // so Delete can later remove that specific block. Failures are logged
+    // but never block the caller — the DB row is already created.
     ava.trackedIssues
-      .post({ ...fields, createdByName: userDisplayName(req.session.user) })
+      .post({
+        ...fields,
+        createdByName: userDisplayName(req.session.user),
+        issueId: created.id,
+      })
+      .then((r) => {
+        const mapping = r && r.mapping && typeof r.mapping === 'object' ? r.mapping : null;
+        const hasSomething = mapping && ((Array.isArray(mapping.all) && mapping.all.length) || (mapping.fields && Object.keys(mapping.fields).length));
+        if (hasSomething) {
+          return atp.trackedIssues
+            .update(created.id, { canvasSectionId: mapping })
+            .catch((err) => trackedIssuesLogger.error({ err: err.message, id: created.id }, 'Failed to persist canvasSectionId'));
+        }
+      })
       .catch((err) => trackedIssuesLogger.error({ err: err.message }, 'AVA tracked-issue post failed'));
     websocket.broadcast().catch(() => {});
     res.json(created);
@@ -514,27 +553,91 @@ router.post('/api/tracked-issues', requireSupervisor, async (req, res) => {
   }
 });
 
+// Fields that map to canvas sections. Diffing the incoming patch against
+// the current row on these keys tells us which section updates to send to
+// AVA. `active` is a DB-only lifecycle flag and stays out of the canvas.
+const CANVAS_MIRRORED_FIELDS = ['summary','incidentDate','severity','status','description','dealerInfo','whatToLookFor'];
+
 router.patch('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
   const patch = pickTrackedIssueFields(req.body || {});
   if ('active' in (req.body || {})) patch.active = !!req.body.active;
+  if (patch.state && !TRACKED_ISSUE_STATES.has(patch.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  // State is the source of truth; keep active in sync so the ticker filter
+  // (which queries active=true) stays correct.
+  if (patch.state) patch.active = patch.state !== 'resolved';
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
   try {
+    const before = await atp.trackedIssues.fetchOne(req.params.id);
     const updated = await atp.trackedIssues.update(req.params.id, patch);
     websocket.broadcast().catch(() => {});
+
+    // Push changed canvas-mirrored fields to Slack in place — but only if
+    // this row has a mapping (row was created via the feature OR backfilled).
+    const mapping = before && before.canvasSectionId;
+    const hasMapping = mapping && typeof mapping === 'object' && !Array.isArray(mapping)
+      && mapping.fields && Object.keys(mapping.fields).length;
+    if (hasMapping) {
+      const canvasUpdates = {};
+      for (const key of CANVAS_MIRRORED_FIELDS) {
+        if (!(key in patch)) continue;
+        const prev = before[key] == null ? null : before[key];
+        const next = patch[key] == null ? null : patch[key];
+        if (String(prev) === String(next)) continue;
+        canvasUpdates[key] = next;
+      }
+      if (Object.keys(canvasUpdates).length) {
+        ava.trackedIssues
+          .patch(mapping, canvasUpdates)
+          .then((r) => {
+            trackedIssuesLogger.info({ id: req.params.id, ok: r && r.ok, failures: (r && r.failures) || null, hasMapping: !!(r && r.mapping) }, 'AVA canvas patch responded');
+            if (!r || !r.mapping) return;
+            const oldStr = JSON.stringify(mapping || null);
+            const newStr = JSON.stringify(r.mapping);
+            const changed = oldStr !== newStr;
+            trackedIssuesLogger.info({ id: req.params.id, changed, oldLen: oldStr.length, newLen: newStr.length }, 'Mapping change check');
+            if (!changed) return;
+            return atp.trackedIssues
+              .update(req.params.id, { canvasSectionId: r.mapping })
+              .then(() => trackedIssuesLogger.info({ id: req.params.id }, 'Persisted updated canvas mapping'))
+              .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'Failed to persist updated canvas mapping'));
+          })
+          .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA canvas patch failed'));
+      }
+    }
+
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update tracked issue' });
   }
 });
 
-// Soft-close by flipping active=false (matches the announcements clear pattern).
+// Hard delete — supervisor-only. Close (soft-hide) is available via PATCH
+// { active: false }; this endpoint fully removes the row from ATP and, if
+// we recorded a canvas section id at create time, removes that block from
+// the Slack canvas too (fire-and-forget — canvas failure never blocks DB
+// delete).
 router.delete('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
   try {
-    await atp.trackedIssues.update(req.params.id, { active: false });
+    const row = await atp.trackedIssues.fetchOne(req.params.id);
+    // destroySections() accepts either the new {all, fields} object or the
+    // legacy flat array. Only call it if something is set.
+    const csid = row && row.canvasSectionId;
+    const hasSections = csid && (
+      (Array.isArray(csid) && csid.length) ||
+      (typeof csid === 'object' && ((Array.isArray(csid.all) && csid.all.length) || (csid.fields && Object.keys(csid.fields).length)))
+    );
+    if (hasSections) {
+      ava.trackedIssues
+        .destroySections(csid)
+        .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA tracked-issue sections delete failed'));
+    }
+    await atp.trackedIssues.destroy(req.params.id);
     websocket.broadcast().catch(() => {});
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to close tracked issue' });
+    res.status(500).json({ error: 'Failed to delete tracked issue' });
   }
 });
 
