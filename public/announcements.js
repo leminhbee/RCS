@@ -8,38 +8,10 @@
   let currentFilter = 'active';
 
   try {
-    const res = await fetch(`${basePath}/api/me`);
-    const user = await res.json();
+    // Topbar hydration lives in topbar.js — just read the resolved user.
+    const user = await window.rcs.userPromise;
     window.isSupervisor = !!user?.supervisor;
     window.isSuperAdmin = !!user?.superAdmin;
-
-    if (user?.name) {
-      const initials = user.name.split(' ').map((p) => p[0]).join('').toUpperCase().slice(0, 2);
-      const av = document.getElementById('ms-avatar');
-      const avLg = document.getElementById('ms-avatar-lg');
-      const nm = document.getElementById('ms-profile-name');
-      if (av) av.textContent = initials;
-      if (avLg) avLg.textContent = initials;
-      if (nm) nm.textContent = user.name;
-    }
-    if (user?.email) {
-      const em = document.getElementById('ms-profile-email');
-      if (em) em.textContent = user.email;
-    }
-    if (user?.supervisor) {
-      const badge = document.getElementById('ms-profile-badge');
-      if (badge) badge.style.display = 'inline-block';
-    }
-    if (user?.ssoEnabled) {
-      const cp = document.getElementById('change-password-link');
-      const cpd = document.getElementById('change-password-divider');
-      if (cp) cp.style.display = 'none';
-      if (cpd) cpd.style.display = 'none';
-    }
-    if (user?.permissions?.reports) {
-      const rn = document.getElementById('reports-nav-link');
-      if (rn) rn.style.display = '';
-    }
   } catch {}
 
   if (window.isSupervisor || window.isSuperAdmin) {

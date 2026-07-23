@@ -29,7 +29,7 @@
     }
     const sep = '<span class="issue-chip-sep" aria-hidden="true">&bull;</span>';
     const chips = list
-      .map((i) => `<span class="issue-chip" data-id="${escapeHtml(i.id)}" role="button" tabindex="0">${escapeHtml(i.summary)}</span>`)
+      .map((i) => `<span class="issue-chip" data-id="${escapeHtml(i.id)}" data-state="${escapeHtml(i.state || (i.active ? 'open' : 'resolved'))}" role="button" tabindex="0">${escapeHtml(i.summary)}</span>`)
       .join(sep);
     track.innerHTML = chips;
     container.style.display = '';
@@ -67,6 +67,16 @@
     if (v == null || v === '') return '';
     return escapeHtml(v);
   }
+  function fmtRich(v) {
+    if (v == null || v === '') return '';
+    const emojied = window.rcsEmojiPicker
+      ? window.rcsEmojiPicker.renderEmojisInText(String(v))
+      : String(v);
+    if (window.marked && typeof window.marked.parse === 'function') {
+      return window.marked.parse(emojied, { breaks: true, gfm: true });
+    }
+    return escapeHtml(emojied);
+  }
 
   function showDetailsModal(issue) {
     const modalEl = document.getElementById('tracked-issue-details-modal');
@@ -78,15 +88,17 @@
     const body = modalEl.querySelector('.tracked-issue-details-body');
     const title = modalEl.querySelector('.tracked-issue-details-title');
     if (title) title.textContent = issue.summary || 'Tracked Issue';
+    const stateLabel = (st) => (st === 'fix_incoming' ? 'Fix Incoming' : st === 'resolved' ? 'Resolved' : 'Open');
     const rows = [];
-    if (issue.incidentDate) rows.push(['Incident Date', issue.incidentDate]);
-    if (issue.severity != null) rows.push(['Severity', issue.severity]);
-    if (issue.status) rows.push(['Status', issue.status]);
-    if (issue.description) rows.push(['Description', issue.description]);
-    if (issue.dealerInfo) rows.push(['Required Information from the Dealer', issue.dealerInfo]);
-    if (issue.whatToLookFor) rows.push(['What to look for?', issue.whatToLookFor]);
+    rows.push(['State', stateLabel(issue.state || (issue.active ? 'open' : 'resolved')), false]);
+    if (issue.incidentDate) rows.push(['Incident Date', issue.incidentDate, false]);
+    if (issue.severity != null) rows.push(['Severity', issue.severity, false]);
+    if (issue.status) rows.push(['Status', issue.status, false]);
+    if (issue.description) rows.push(['Description', issue.description, true]);
+    if (issue.dealerInfo) rows.push(['Required Information from the Dealer', issue.dealerInfo, true]);
+    if (issue.whatToLookFor) rows.push(['What to look for?', issue.whatToLookFor, true]);
     body.innerHTML = rows
-      .map(([label, val]) => `<div class="tracked-issue-details-row"><div class="tracked-issue-details-label">${escapeHtml(label)}</div><div class="tracked-issue-details-value">${fmt(val)}</div></div>`)
+      .map(([label, val, rich]) => `<div class="tracked-issue-details-row"><div class="tracked-issue-details-label">${escapeHtml(label)}</div><div class="tracked-issue-details-value">${rich ? fmtRich(val) : fmt(val)}</div></div>`)
       .join('') || '<em>No additional details.</em>';
     // Bootstrap 5 modal is available on the page (see topbar's dropdowns).
     if (window.bootstrap && window.bootstrap.Modal) {
@@ -119,9 +131,9 @@
 
   async function init() {
     try {
-      const meRes = await fetch(`${basePath}/api/me`);
-      if (!meRes.ok) return;
-      const me = await meRes.json();
+      // Topbar handles nav-link reveal + profile hydration. We just wait on
+      // the shared user promise and gate on the ticker flag.
+      const me = window.rcs && window.rcs.userPromise ? await window.rcs.userPromise : null;
       if (!me || !me.trackedIssuesTicker) return; // per-user gate
       await loadTickerSpeed();
       await refresh();

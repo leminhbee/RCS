@@ -1,0 +1,35 @@
+<div class="modal fade" id="preferences-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Preferences</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="preferences-modal-body">
+        <div class="preferences-row">
+          <label class="preferences-label" for="pref-break-input">Break reminder</label>
+          <div class="preferences-input-wrap">
+            <input type="number" min="0" step="1" class="form-control form-control-sm" id="pref-break-input">
+            <span class="preferences-unit">min</span>
+          </div>
+          <div class="preferences-hint">Warn me this many minutes before my 15-minute break ends.</div>
+        </div>
+        <div class="preferences-row">
+          <label class="preferences-label" for="pref-lunch-input">Lunch reminder</label>
+          <div class="preferences-input-wrap">
+            <input type="number" min="0" step="1" class="form-control form-control-sm" id="pref-lunch-input">
+            <span class="preferences-unit">min</span>
+          </div>
+          <div class="preferences-hint">Warn me this many minutes before my 60-minute lunch ends.</div>
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center">
+        <span id="preferences-feedback" class="settings-feedback"></span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="preferences-reset-btn" disabled>Discard</button>
+          <button type="button" class="btn btn-primary btn-sm" id="preferences-save-btn" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

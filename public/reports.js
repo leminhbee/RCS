@@ -918,8 +918,9 @@ async function generateReport() {
 async function init() {
   const basePath = location.pathname.replace(/\/[^/]*$/, '');
   try {
-    const res = await fetch(`${basePath}/api/me`);
-    const user = await res.json();
+    // Topbar hydration lives in topbar.js — just read the resolved user for
+    // page-specific gating.
+    const user = await window.rcs.userPromise;
 
     if (!user?.permissions?.reports) {
       document.getElementById('access-denied').style.display = '';
@@ -931,17 +932,6 @@ async function init() {
     const canViewAll = user?.viewScopes?.reports === 'all';
     if (!canViewAll) {
       document.getElementById('team-member-select').style.display = 'none';
-    }
-
-    // Populate profile
-    if (user?.name) {
-      const initials = user.name.split(' ').map((p) => p[0]).join('').toUpperCase().slice(0, 2);
-      document.getElementById('ms-avatar').textContent = initials;
-      document.getElementById('ms-avatar-lg').textContent = initials;
-      document.getElementById('ms-profile-name').textContent = user.name;
-    }
-    if (user?.email) {
-      document.getElementById('ms-profile-email').textContent = user.email;
     }
 
     document.getElementById('reports-content').style.display = '';
