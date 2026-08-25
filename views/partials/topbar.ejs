@@ -99,6 +99,7 @@ const _pageName = typeof pageName !== 'undefined' ? pageName : null;
     <% } %>
     <a href="/dashboard/reports.html" class="ms-nav-link" id="reports-nav-link" style="display:none">Reports</a>
     <a href="/dashboard/announcements.html" class="ms-nav-link" id="announcements-nav-link">Announcements</a>
+    <a href="/dashboard/tracked-issues.html" class="ms-nav-link" id="tracked-issues-nav-link" style="display:none">Tracked Issues</a>
   </div>
   <div class="ms-nav-right">
     <div class="dropdown">
@@ -143,6 +144,12 @@ const _pageName = typeof pageName !== 'undefined' ? pageName : null;
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 11v2c0 .55.45 1 1 1h1l3 4h2v-4h1l5 3V7l-5 3H8L5 11H4c-.55 0-1 .45-1 1zm15.5 1c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
           </div>
           <span>New Announcement</span>
+        </a>
+        <a href="#" id="tracked-issue-menu" class="ms-switch-account-row" style="display:none" role="button" data-bs-toggle="modal" data-bs-target="#tracked-issue-compose-modal">
+          <div class="ms-switch-icon-wrap">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 1 21h22L12 2zm0 4.53L19.47 19H4.53L12 6.53zM11 14v2h2v-2h-2zm0-6v4h2V8h-2z"/></svg>
+          </div>
+          <span>New Tracked Issue</span>
         </a>
         <a href="#" id="user-flags-menu" class="ms-switch-account-row" style="display:none" role="button" data-bs-toggle="modal" data-bs-target="#user-flags-modal">
           <div class="ms-switch-icon-wrap">

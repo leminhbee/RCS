@@ -1,0 +1,87 @@
+<%
+// Modals for the tracked-issues feature. Included on every page that shows
+// the ticker so both read (details) and write (compose) flows work.
+//
+// Compose is supervisor-only — the menu entry that opens this modal is
+// revealed by dashboard.js when the current user is a supervisor.
+%>
+<!-- Details (read-only) -->
+<div class="modal fade" id="tracked-issue-details-modal" tabindex="-1" aria-hidden="true" aria-labelledby="tracked-issue-details-title">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title tracked-issue-details-title" id="tracked-issue-details-title">Tracked Issue</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body tracked-issue-details-body"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Compose (supervisor-only). Wiring lives in tracked-issues-compose.js. -->
+<div class="modal fade" id="tracked-issue-compose-modal" tabindex="-1" aria-hidden="true" aria-labelledby="tracked-issue-compose-title">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="tracked-issue-compose-title">New Tracked Issue</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="tracked-issue-edit-id" value="">
+        <div class="mb-2">
+          <label class="form-label" for="tracked-issue-summary">Issue Summary <span class="text-danger">*</span></label>
+          <input class="form-control" id="tracked-issue-summary" maxlength="200" placeholder="Short one-line summary shown in the ticker">
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-sm-4">
+            <label class="form-label" for="tracked-issue-incident-date">Incident Date</label>
+            <input type="date" class="form-control" id="tracked-issue-incident-date">
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label" for="tracked-issue-severity">Severity level</label>
+            <select class="form-select" id="tracked-issue-severity">
+              <option value="">&mdash;</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label" for="tracked-issue-state">State</label>
+            <select class="form-select" id="tracked-issue-state">
+              <option value="open">Open</option>
+              <option value="fix_incoming">Fix Incoming</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="tracked-issue-status">Status</label>
+          <input class="form-control" id="tracked-issue-status" maxlength="500" placeholder="e.g. Fixed. New app 4.3.127.337 shipping Wednesday">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="tracked-issue-description">Description of Issue</label>
+          <textarea class="form-control" id="tracked-issue-description" rows="3"></textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="tracked-issue-dealer-info">Required Information from the Dealer</label>
+          <textarea class="form-control" id="tracked-issue-dealer-info" rows="2"></textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="tracked-issue-what-to-look-for">What to look for? <span class="text-muted">(Common things to help identify?)</span></label>
+          <textarea class="form-control" id="tracked-issue-what-to-look-for" rows="2"></textarea>
+        </div>
+        <div id="tracked-issue-compose-feedback" class="small text-danger" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="tracked-issue-compose-post">Post</button>
+      </div>
+    </div>
+  </div>
+</div>

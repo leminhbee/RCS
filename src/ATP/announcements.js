@@ -48,7 +48,11 @@ async function destroy(id) {
     const response = await axios.delete(`/announcements/${id}`);
     return response.data;
   } catch (error) {
-    throw new Error('Error deleting announcement from ATP: ' + error.message);
+    // Carry the upstream status so a caller can distinguish an already-deleted
+    // row (404) from a real failure.
+    const err = new Error('Error deleting announcement from ATP: ' + error.message);
+    err.status = error.response && error.response.status;
+    throw err;
   }
 }
 

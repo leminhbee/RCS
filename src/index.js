@@ -21,7 +21,7 @@ const mutex = new Mutex();
 
 // --- Body parsers ---
 // JSON
-app.use(express.json());
+app.use(express.json({ limit: '32mb' }));
 // text/json (some webhooks may send JSON but with text/json header)
 app.use(express.text({ type: 'text/json' }));
 // URL-encoded (HTML form submissions)
@@ -50,6 +50,7 @@ app.set('views', path.join(__dirname, '../views'));
 app.get(['/dashboard', '/dashboard/', '/dashboard/index.html'], requireAuth, (req, res) => res.render('index'));
 app.get('/dashboard/reports.html', requireAuth, (req, res) => res.render('reports'));
 app.get('/dashboard/announcements.html', requireAuth, (req, res) => res.render('announcements'));
+app.get('/dashboard/tracked-issues.html', requireAuth, (req, res) => res.render('tracked-issues'));
 
 // Static assets (css, js, images, etc.)
 app.use('/dashboard', requireAuth, express.static(path.join(__dirname, '../public')));

@@ -114,3 +114,6 @@ dist
 
 # Mac Files
 ._*
+
+# Announcement attachments stored on disk
+UPLOADS/

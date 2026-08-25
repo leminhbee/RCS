@@ -1,12 +1,15 @@
-const router = require('express').Router();
+const express = require('express');
+const router = express.Router();
 const dashboardController = require('../controllers/dashboard');
 const reportsController = require('../controllers/reports');
 const atp = require('../ATP');
 const ava = require('../AVA');
 const websocket = require('../helpers/websocket');
+const announcementFiles = require('../helpers/announcementFiles');
 const { createLogger } = require('../helpers/logger');
 
 const announcementsLogger = createLogger('announcements');
+const trackedIssuesLogger = createLogger('trackedIssues');
 const {
   getVisibilityConfig,
   getPermissions,
@@ -75,8 +78,13 @@ router.delete('/api/call/:id', requireSupervisor, dashboardController.clearAgent
 router.get('/api/users/flags', requireSupervisor, async (req, res) => {
   try {
     const users = await atp.users.fetchAll({});
+    // super_admins can manage flags on supervisors too; regular supervisors
+    // only see non-supervisor agents. Extension prefix filter (82* = real
+    // agent/supervisor accounts) applies to both, so admin/test accounts
+    // stay hidden.
+    const isSuperAdmin = !!(req.session && req.session.user && req.session.user.superAdmin);
     const list = users
-      .filter((u) => !u.supervisor)
+      .filter((u) => isSuperAdmin || !u.supervisor)
       .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
       .map((u) => {
         const row = {
@@ -259,6 +267,39 @@ router.put('/api/settings/channels', async (req, res) => {
   }
 });
 
+// Tracked-issues ticker loop duration (seconds). Global setting; read by all
+// clients so the marquee speed stays in sync. Only super_admins can change it.
+router.get('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  try {
+    const setting = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    const raw = setting && setting.value;
+    const value = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    const seconds = Number.isFinite(value.seconds) ? value.seconds : 60;
+    res.json({ seconds, defaultSeconds: 60 });
+  } catch {
+    res.status(500).json({ error: 'Failed to load ticker speed setting' });
+  }
+});
+
+router.put('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const n = Number(req.body?.seconds);
+  if (!Number.isFinite(n) || n < 5 || n > 600 || Math.floor(n) !== n) {
+    return res.status(400).json({ error: 'seconds must be an integer between 5 and 600' });
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: JSON.stringify({ seconds: n }) });
+    } else {
+      await atp.settings.create({ key: 'tracked-issues-ticker-speed', value: JSON.stringify({ seconds: n }) });
+    }
+    res.json({ seconds: n });
+  } catch {
+    res.status(500).json({ error: 'Failed to save ticker speed' });
+  }
+});
+
 // --- Announcements ---
 
 function userDisplayName(u) {
@@ -341,26 +382,131 @@ router.get('/api/announcements', async (req, res) => {
   }
 });
 
-router.post('/api/announcements', requireSupervisor, async (req, res) => {
+router.post('/api/announcements', express.json({ limit: '32mb' }), requireSupervisor, async (req, res) => {
   const title = String(req.body?.title || '').trim();
   const body = String(req.body?.body || '').trim();
+  const files = Array.isArray(req.body?.files) ? req.body.files : [];
+  const totalFileBytes = files.reduce((n, f) => n + (typeof f.base64 === 'string' ? Math.floor(f.base64.length * 0.75) : 0), 0);
+  announcementsLogger.info({
+    userId: req.session.user.id,
+    userName: userDisplayName(req.session.user),
+    title,
+    bodyLen: body.length,
+    fileCount: files.length,
+    totalFileBytes,
+  }, 'Announcement POST received');
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
   if (title.length > 200) return res.status(400).json({ error: 'title must be 200 chars or fewer' });
+  if (totalFileBytes > announcementFiles.MAX_TOTAL_BYTES) {
+    const mb = (totalFileBytes / (1024 * 1024)).toFixed(1);
+    const max = Math.floor(announcementFiles.MAX_TOTAL_BYTES / (1024 * 1024));
+    return res.status(413).json({ error: `Attachments total ${mb}MB — max ${max}MB combined.` });
+  }
   try {
     const created = await atp.announcements.create({
       title,
       body,
       createdBy: req.session.user.id,
     });
-    // Fire-and-forget Slack canvas post.
-    ava.announcements
-      .post(title, body, userDisplayName(req.session.user))
-      .catch((err) => announcementsLogger.error({ err: err.message }, 'AVA announcement post failed'));
+    // Keep our own copy of the attachments so they can be viewed on the
+    // dashboard. A Slack permalink can't do that job — it needs a Slack session
+    // to open and a bearer token to inline, so it only ever worked as a bounce
+    // into Slack. Stored before the Slack post so an attachment survives on the
+    // dashboard even when Slack delivery fails.
+    let storedFiles = [];
+    try {
+      storedFiles = await announcementFiles.save(created.id, files);
+    } catch (err) {
+      announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to store announcement attachments');
+    }
+    // Post to cscChat via AVA (with optional files) and wait for the outcome,
+    // so the poster is told whether Slack actually received it. The row is
+    // already saved either way — a Slack failure downgrades the response to a
+    // warning rather than failing the request.
+    let slackPosted = true;
+    let slackError = null;
+    try {
+      const r = await ava.announcements.post(title, body, userDisplayName(req.session.user), files);
+      // Keep the permalink next to our own copy for reference. Slack returns
+      // uploads in the order they were sent.
+      const permalinks = Array.isArray(r && r.permalinks) ? r.permalinks : [];
+      permalinks.forEach((link, i) => {
+        if (storedFiles[i]) storedFiles[i].slackPermalink = link;
+      });
+    } catch (err) {
+      slackPosted = false;
+      slackError = err.message;
+      announcementsLogger.error({ err: err.message, id: created.id, fileCount: files.length, totalFileBytes }, 'AVA announcement post failed');
+    }
+    if (storedFiles.length) {
+      await atp.announcements
+        .update(created.id, { fileUrls: storedFiles })
+        .catch((err) => announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to persist announcement fileUrls'));
+    }
     // Push to all open dashboards.
     websocket.broadcast().catch(() => {});
-    res.json(created);
+    res.json({ ...created, fileUrls: storedFiles, slackPosted, slackError });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create announcement' });
+  }
+});
+
+// Serves an announcement attachment from disk. The whole dashboard router
+// sits behind requireAuth, so these are never publicly reachable. The stored
+// filename comes from the row's own metadata rather than the URL, so :idx can't
+// be walked outside the announcement's directory.
+router.get('/api/announcements/:id/files/:idx', async (req, res) => {
+  const { id, idx } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(404).json({ error: 'Attachment not found' });
+  try {
+    const announcement = await atp.announcements.fetchOne(id);
+    if (!announcement) return res.status(404).json({ error: 'Attachment not found' });
+    const file = announcementFiles.resolve(id, idx, announcement.fileUrls);
+    if (!file) return res.status(404).json({ error: 'Attachment not found' });
+    // Images and PDFs preview in the browser; anything else downloads under its
+    // original name.
+    const inline = /^image\//.test(file.mimeType) || file.mimeType === 'application/pdf';
+    res.type(file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`
+    );
+    res.sendFile(file.path, (err) => {
+      if (!err) return;
+      announcementsLogger.error({ err: err.message, id, idx }, 'Failed to send announcement attachment');
+      if (!res.headersSent) res.status(404).json({ error: 'Attachment not found' });
+    });
+  } catch (error) {
+    announcementsLogger.error({ err: error.message, id, idx }, 'Error resolving announcement attachment');
+    res.status(500).json({ error: 'Failed to fetch attachment' });
+  }
+});
+
+// Permanent delete, as opposed to the soft delete below that only flips
+// active=false. Acknowledgement rows cascade in the database; the attachment
+// files on disk are ours to clean up.
+router.delete('/api/announcements/:id/permanent', requireSupervisor, async (req, res) => {
+  const { id } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(400).json({ error: 'Invalid announcement id' });
+  try {
+    await atp.announcements.destroy(id);
+    await announcementFiles.remove(id);
+    announcementsLogger.info({
+      id,
+      userId: req.session.user.id,
+      userName: userDisplayName(req.session.user),
+    }, 'Announcement permanently deleted');
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.status === 404) {
+      // Already gone upstream — drop any files we're still holding so a stale
+      // row can't strand its attachments on disk.
+      await announcementFiles.remove(id);
+      return res.status(404).json({ error: 'Announcement not found' });
+    }
+    announcementsLogger.error({ err: error.message, id }, 'Failed to permanently delete announcement');
+    res.status(500).json({ error: 'Failed to delete announcement' });
   }
 });
 
@@ -408,6 +554,216 @@ router.get('/api/announcements/:id/acks', requireSupervisor, async (req, res) =>
     res.json({ acknowledged, pending });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch announcement acks' });
+  }
+});
+
+
+// -------- Tracked issues --------
+// Fields accepted in create/update (mirrors ATP whitelist minus id/timestamps/createdBy).
+const TRACKED_ISSUE_FIELDS = [
+  'summary',
+  'incidentDate',
+  'severity',
+  'status',
+  'description',
+  'dealerInfo',
+  'whatToLookFor',
+  'state',
+];
+const TRACKED_ISSUE_STATES = new Set(['open', 'fix_incoming', 'resolved']);
+
+function pickTrackedIssueFields(body) {
+  const out = {};
+  for (const k of TRACKED_ISSUE_FIELDS) {
+    if (k in body) out[k] = body[k];
+  }
+  return out;
+}
+
+// Active only. Anyone signed in can read; the ticker is gated at the UI layer
+// by the user's tracked_issues_ticker flag.
+router.get('/api/tracked-issues', async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({ active: true });
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+// All (active + resolved) — supervisors only, for the management page.
+// The management page is available to any user with the trackedIssuesTicker
+// flag (matches the ticker's per-user gate); supervisors and super_admins
+// keep access unconditionally.
+router.get('/api/tracked-issues/all', (req, res, next) => {
+  const u = req.session && req.session.user;
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  if (u.trackedIssuesTicker || u.supervisor || u.superAdmin) return next();
+  return res.status(403).json({ error: 'Forbidden' });
+}, async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({});
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+router.get('/api/tracked-issues/:id', async (req, res) => {
+  try {
+    const issue = await atp.trackedIssues.fetchOne(req.params.id);
+    if (!issue) return res.status(404).json({ error: 'Tracked issue not found' });
+    res.json(issue);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issue' });
+  }
+});
+
+router.post('/api/tracked-issues', requireSupervisor, async (req, res) => {
+  const fields = pickTrackedIssueFields(req.body || {});
+  const summary = String(fields.summary || '').trim();
+  if (!summary) return res.status(400).json({ error: 'summary is required' });
+  if (summary.length > 200) return res.status(400).json({ error: 'summary must be 200 chars or fewer' });
+  fields.summary = summary;
+  if (fields.state && !TRACKED_ISSUE_STATES.has(fields.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  if (fields.state) fields.active = fields.state !== 'resolved';
+  try {
+    const created = await atp.trackedIssues.create({
+      ...fields,
+      createdBy: req.session.user.id,
+    });
+    // Async: append to the Slack canvas AND persist the returned sectionId
+    // so Delete can later remove that specific block. Failures are logged
+    // but never block the caller — the DB row is already created.
+    ava.trackedIssues
+      .post({
+        ...fields,
+        createdByName: userDisplayName(req.session.user),
+        issueId: created.id,
+      })
+      .then((r) => {
+        const mapping = r && r.mapping && typeof r.mapping === 'object' ? r.mapping : null;
+        const hasSomething = mapping && ((Array.isArray(mapping.all) && mapping.all.length) || (mapping.fields && Object.keys(mapping.fields).length));
+        if (hasSomething) {
+          return atp.trackedIssues
+            .update(created.id, { canvasSectionId: mapping })
+            .catch((err) => trackedIssuesLogger.error({ err: err.message, id: created.id }, 'Failed to persist canvasSectionId'));
+        }
+      })
+      .catch((err) => trackedIssuesLogger.error({ err: err.message }, 'AVA tracked-issue post failed'));
+    websocket.broadcast().catch(() => {});
+    res.json(created);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create tracked issue' });
+  }
+});
+
+// Fields that map to canvas sections. Diffing the incoming patch against
+// the current row on these keys tells us which section updates to send to
+// AVA. `active` is a DB-only lifecycle flag and stays out of the canvas.
+const CANVAS_MIRRORED_FIELDS = ['summary','incidentDate','severity','status','description','dealerInfo','whatToLookFor'];
+
+router.patch('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  const patch = pickTrackedIssueFields(req.body || {});
+  if ('active' in (req.body || {})) patch.active = !!req.body.active;
+  if (patch.state && !TRACKED_ISSUE_STATES.has(patch.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  // State is the source of truth; keep active in sync so the ticker filter
+  // (which queries active=true) stays correct.
+  if (patch.state) patch.active = patch.state !== 'resolved';
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+  try {
+    const before = await atp.trackedIssues.fetchOne(req.params.id);
+    const updated = await atp.trackedIssues.update(req.params.id, patch);
+    websocket.broadcast().catch(() => {});
+
+    // Push changed canvas-mirrored fields to Slack in place — but only if
+    // this row has a mapping (row was created via the feature OR backfilled).
+    const mapping = before && before.canvasSectionId;
+    const hasMapping = mapping && typeof mapping === 'object' && !Array.isArray(mapping)
+      && mapping.fields && Object.keys(mapping.fields).length;
+    if (hasMapping) {
+      const canvasUpdates = {};
+      for (const key of CANVAS_MIRRORED_FIELDS) {
+        if (!(key in patch)) continue;
+        const prev = before[key] == null ? null : before[key];
+        const next = patch[key] == null ? null : patch[key];
+        if (String(prev) === String(next)) continue;
+        canvasUpdates[key] = next;
+      }
+      if (Object.keys(canvasUpdates).length) {
+        ava.trackedIssues
+          .patch(mapping, canvasUpdates)
+          .then((r) => {
+            trackedIssuesLogger.info({ id: req.params.id, ok: r && r.ok, failures: (r && r.failures) || null, hasMapping: !!(r && r.mapping) }, 'AVA canvas patch responded');
+            if (!r || !r.mapping) return;
+            const oldStr = JSON.stringify(mapping || null);
+            const newStr = JSON.stringify(r.mapping);
+            const changed = oldStr !== newStr;
+            trackedIssuesLogger.info({ id: req.params.id, changed, oldLen: oldStr.length, newLen: newStr.length }, 'Mapping change check');
+            if (!changed) return;
+            return atp.trackedIssues
+              .update(req.params.id, { canvasSectionId: r.mapping })
+              .then(() => trackedIssuesLogger.info({ id: req.params.id }, 'Persisted updated canvas mapping'))
+              .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'Failed to persist updated canvas mapping'));
+          })
+          .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA canvas patch failed'));
+      }
+    }
+
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update tracked issue' });
+  }
+});
+
+// Batch reorder — supervisor-only. Takes an ordered array of IDs and
+// assigns sort_order = index * 100 + 100 in that order. The frontend groups
+// this call per (state) so drag-and-drop only affects rows within the same
+// state bucket.
+router.post('/api/tracked-issues/reorder', requireSupervisor, async (req, res) => {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : null;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      await atp.trackedIssues.update(ids[i], { sortOrder: (i + 1) * 100 });
+    }
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    trackedIssuesLogger.error({ err: error.message }, 'Reorder failed');
+    res.status(500).json({ error: 'Failed to reorder tracked issues' });
+  }
+});
+
+// Hard delete — supervisor-only. Close (soft-hide) is available via PATCH
+// { active: false }; this endpoint fully removes the row from ATP and, if
+// we recorded a canvas section id at create time, removes that block from
+// the Slack canvas too (fire-and-forget — canvas failure never blocks DB
+// delete).
+router.delete('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  try {
+    const row = await atp.trackedIssues.fetchOne(req.params.id);
+    // destroySections() accepts either the new {all, fields} object or the
+    // legacy flat array. Only call it if something is set.
+    const csid = row && row.canvasSectionId;
+    const hasSections = csid && (
+      (Array.isArray(csid) && csid.length) ||
+      (typeof csid === 'object' && ((Array.isArray(csid.all) && csid.all.length) || (csid.fields && Object.keys(csid.fields).length)))
+    );
+    if (hasSections) {
+      ava.trackedIssues
+        .destroySections(csid)
+        .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA tracked-issue sections delete failed'));
+    }
+    await atp.trackedIssues.destroy(req.params.id);
+    websocket.broadcast().catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete tracked issue' });
   }
 });
 

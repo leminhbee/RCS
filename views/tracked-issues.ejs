@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Announcements</title>
+  <title>Tracked Issues</title>
   <link rel="icon" type="image/png" href="/dashboard/black_ops_a.png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
@@ -11,7 +11,7 @@
 </head>
 <body>
 
-  <%- include('partials/topbar', { pageName: 'Announcements' }) %>
+  <%- include('partials/topbar', { pageName: 'Tracked Issues' }) %>
   <%- include('partials/announcement-banner') %>
   <%- include('partials/issues-ticker') %>
   <%- include('partials/tracked-issue-modals') %>
@@ -24,34 +24,34 @@
 
     <div class="card mb-3">
       <div class="card-header d-flex align-items-center gap-2 flex-wrap">
-        <strong>Announcements</strong>
-        <div class="btn-group btn-group-sm ms-3" role="group" id="announcement-filter">
+        <strong>Tracked Issues</strong>
+        <div class="btn-group btn-group-sm ms-3" role="group" id="tracked-issue-filter">
           <button type="button" class="btn btn-outline-primary active" data-filter="active">Active</button>
-          <button type="button" class="btn btn-outline-primary" data-filter="cleared">Cleared</button>
+          <button type="button" class="btn btn-outline-primary" data-filter="resolved">Resolved</button>
           <button type="button" class="btn btn-outline-primary" data-filter="all">All</button>
         </div>
-        <button type="button" class="btn btn-primary btn-sm ms-auto" id="announcement-page-compose-btn" style="display:none" data-bs-toggle="modal" data-bs-target="#announcement-compose-modal">+ New Announcement</button>
+        <button type="button" class="btn btn-primary btn-sm ms-auto" id="tracked-issue-page-compose-btn" style="display:none" data-bs-toggle="modal" data-bs-target="#tracked-issue-compose-modal">+ New Tracked Issue</button>
       </div>
       <div class="card-body">
-        <div id="announcement-list">Loading…</div>
+        <div id="tracked-issue-list">Loading…</div>
       </div>
     </div>
   </div>
 
-
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <script src="/dashboard/tracked-issue-emoji-picker.js"></script>
   <script src="/dashboard/topbar.js"></script>
   <script src="/dashboard/announcement-banner.js"></script>
   <script src="/dashboard/preferences-panel.js"></script>
   <script src="/dashboard/user-flags-panel.js"></script>
   <script src="/dashboard/dashboard-settings-panel.js"></script>
-  <script src="/dashboard/issues-ticker.js"></script>
-  <script src="/dashboard/tracked-issues-compose.js"></script>
   <script src="/dashboard/announcements-shared.js"></script>
   <script src="/dashboard/announcement-compose.js"></script>
-  <script src="/dashboard/announcements.js"></script>
+  <script src="/dashboard/issues-ticker.js"></script>
+  <script src="/dashboard/tracked-issues-compose.js"></script>
+  <script src="/dashboard/tracked-issues.js"></script>
 </body>
 </html>

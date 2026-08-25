@@ -1,0 +1,32 @@
+<%
+// Announcement banner + ack modals. Sits between the topbar and any
+// tracked-issues ticker. Populated by public/announcement-banner.js,
+// which self-registers on the rcs:user-loaded event. Skips silently
+// when the current page doesn't include this partial.
+%>
+<div id="announcement-banner" class="announcement-banner" style="display:none"></div>
+
+<!-- Acknowledge Announcements modal — shown to non-supervisors with unacked items. -->
+<div class="modal fade" id="announcement-ack-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Announcements — please acknowledge</h5>
+      </div>
+      <div class="modal-body" id="announcement-ack-modal-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Ack status modal (supervisors). -->
+<div class="modal fade" id="announcement-acks-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="announcement-acks-modal-title">Acknowledgement Status</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="announcement-acks-modal-body">Loading&hellip;</div>
+    </div>
+  </div>
+</div>

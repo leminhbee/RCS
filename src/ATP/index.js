@@ -4,4 +4,5 @@ module.exports = {
   calls: require('./calls'),
   settings: require('./settings'),
   announcements: require('./announcements'),
+  trackedIssues: require('./trackedIssues'),
 };
