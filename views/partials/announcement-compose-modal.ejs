@@ -14,6 +14,11 @@
           <label class="form-label" for="announcement-compose-body">Body</label>
           <textarea id="announcement-compose-body" class="form-control form-control-sm" rows="5"></textarea>
         </div>
+        <div class="mb-2">
+          <label class="form-label" for="announcement-compose-files">Attach files <span class="text-muted small">(optional)</span></label>
+          <input type="file" id="announcement-compose-files" class="form-control form-control-sm" multiple>
+          <div id="announcement-compose-files-list" class="small text-muted mt-1"></div>
+        </div>
       </div>
       <div class="modal-footer d-flex justify-content-between align-items-center">
         <span id="announcement-compose-feedback" class="settings-feedback"></span>

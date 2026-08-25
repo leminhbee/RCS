@@ -3,6 +3,24 @@
 // modal partial isn't included on the current page.
 
 (() => {
+// Inlined from dashboard.js — dashboard-settings-panel loads on every page,
+// so it can't depend on constants scoped to dashboard.js.
+const FEATURE_LABELS = {
+  stats: 'Stats Grid',
+  callLists: 'Call Lists',
+  repeatCallers: 'Repeat Callers',
+  agentMetrics: 'Agent Metrics (Login, Calls, Outbound)',
+  callCountByNumber: 'Times Called Column',
+  reports: 'Reports',
+};
+const TIER_LABELS = {
+  all: 'All Users',
+  supervisors: 'Supervisors Only',
+  approvedUsers: 'Approved Users',
+  selfOnly: 'All Users (own data only)',
+};
+const FALLBACK_TIERS = ['all', 'supervisors', 'approvedUsers'];
+
 const secToMin = (s) => Math.max(0, Math.round((Number(s) || 0) / 60));
 const minToSec = (m) => Math.max(0, Math.round(Number(m) || 0) * 60);
 

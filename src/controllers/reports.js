@@ -4,6 +4,9 @@ const { getVisibilityConfig, canViewAllUsers } = require('../helpers/dashboardAc
 
 const MAX_RANGE_DAYS = 93;
 const MAX_CALL_DURATION_SECONDS = 8 * 3600;
+// Row cap for the raw call listing, mirroring the SOQL LIMIT on cases. The
+// response reports how many rows were dropped so the UI can say so out loud.
+const MAX_CALL_DETAIL_ROWS = 2000;
 
 const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0);
 const isSaneDuration = (d) => d != null && d <= MAX_CALL_DURATION_SECONDS;
@@ -263,6 +266,35 @@ const getReports = async (req, res) => {
       };
     }
 
+    // --- Calls Detail ---
+    // Built from `calls`, so it inherits the same date range and team-member filter
+    // as every other section. Anomalous-duration calls stay in the listing but carry
+    // a `flagged` marker — the detail view should still reconcile against the raw
+    // records even though the stats above exclude them.
+    const callsByRecency = [...calls].sort((a, b) => String(b.startTime || '').localeCompare(String(a.startTime || '')));
+    const callDetail = {
+      total: calls.length,
+      truncated: Math.max(0, calls.length - MAX_CALL_DETAIL_ROWS),
+      records: callsByRecency.slice(0, MAX_CALL_DETAIL_ROWS).map((c) => ({
+        id: c.id,
+        startTime: c.startTime || null,
+        endTime: c.endTime || null,
+        agentName: c.userId ? (userMap[c.userId] || 'Unknown') : '--',
+        direction: c.outbound ? 'Outbound' : 'Inbound',
+        callbackRequested: !!c.callBackRequested,
+        status: c.status,
+        callerNumber: c.callerNumber || null,
+        callerName: c.callerName || null,
+        companyName: c.companyName || null,
+        duration: c.duration ?? null,
+        queueDuration: c.queueDuration ?? null,
+        flagged: c.duration != null && c.duration > MAX_CALL_DURATION_SECONDS,
+        caseNumber: c.salesforceCaseNumber || null,
+        caseId: c.salesforceCaseId || null,
+        callLink: c.callLink || null,
+      })),
+    };
+
     // --- Salesforce Cases ---
     let cases = { stats: { total: 0, open: 0, closed: 0 }, records: [] };
     try {
@@ -281,7 +313,7 @@ const getReports = async (req, res) => {
         }
       }
 
-      const soql = `SELECT Id, CaseNumber, Subject, Status, CreatedDate, ClosedDate,
+      const soql = `SELECT Id, CaseNumber, Subject, Status, IsClosed, CreatedDate, ClosedDate,
                      Owner.Name, Account.Name, First_Name__c, Last_Name__c
                      FROM Case
                      WHERE CreatedDate >= ${sfdcStart} AND CreatedDate < ${sfdcEnd}
@@ -293,9 +325,14 @@ const getReports = async (req, res) => {
       const result = await sfdcConn.query(soql);
       const records = result.records || [];
 
-      const open = records.filter((r) => r.Status !== 'Closed').length;
+      // Don't string-match on Status: we mostly close cases as 'Solved', not 'Closed'.
+      // IsClosed is true for every status the picklist flags as closed, so new closed
+      // statuses count correctly without another code change. Fall back to ClosedDate
+      // in case the field ever comes back undefined.
+      const isCaseClosed = (r) => (r.IsClosed !== undefined ? r.IsClosed === true : Boolean(r.ClosedDate));
+      const closed = records.filter(isCaseClosed).length;
       cases = {
-        stats: { total: records.length, open, closed: records.length - open },
+        stats: { total: records.length, open: records.length - closed, closed },
         records: records.map((r) => ({
           id: r.Id,
           caseNumber: r.CaseNumber,
@@ -323,6 +360,7 @@ const getReports = async (req, res) => {
       allDates,
       teamAvgDaily,
       teamAvgOverall,
+      callDetail,
       cases,
       userList,
     });

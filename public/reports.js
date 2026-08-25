@@ -26,12 +26,26 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+// Local calendar date, not toISOString() — UTC shifts the day boundary, which
+// would make "Today" resolve to the wrong date depending on the hour.
+function toLocalISODate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // -- Date presets --
 function getPresetRange(preset) {
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0=Sun
-  const toISO = (d) => d.toISOString().split('T')[0];
+  const toISO = toLocalISODate;
 
+  if (preset === 'today') {
+    return { startDate: toISO(today), endDate: toISO(today) };
+  }
+  if (preset === 'yesterday') {
+    const day = new Date(today);
+    day.setDate(today.getDate() - 1);
+    return { startDate: toISO(day), endDate: toISO(day) };
+  }
   if (preset === 'thisWeek') {
     const start = new Date(today);
     start.setDate(today.getDate() - ((dayOfWeek + 6) % 7)); // Monday
@@ -525,6 +539,140 @@ function renderAgentChart() {
   });
 }
 
+// -- Render: Calls Detail --
+let callSearch = '';
+let callSortKey = 'startTime';
+let callSortDir = 'desc';
+
+// Caller/company names arrive from Salesforce, so keep them out of the HTML parser.
+function escapeHtml(val) {
+  return String(val ?? '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
+function formatCallStatus(status) {
+  if (!status) return '--';
+  return String(status).toLowerCase().split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+const CALL_COLUMNS = {
+  startTime:     { label: 'Date / Time', sortVal: (c) => (c.startTime ? new Date(c.startTime).getTime() : 0) },
+  agentName:     { label: 'Agent',       sortVal: (c) => c.agentName || '' },
+  direction:     { label: 'Direction',   sortVal: (c) => c.direction || '' },
+  status:        { label: 'Status',      sortVal: (c) => c.status || '' },
+  callerNumber:  { label: 'Caller',      sortVal: (c) => c.callerNumber || '' },
+  callerName:    { label: 'Name',        sortVal: (c) => c.callerName || '' },
+  companyName:   { label: 'Company',     sortVal: (c) => c.companyName || '' },
+  duration:      { label: 'Duration',    sortVal: (c) => c.duration || 0 },
+  queueDuration: { label: 'Queue',       sortVal: (c) => c.queueDuration || 0 },
+  caseNumber:    { label: 'Case #',      sortVal: (c) => c.caseNumber || '' },
+  callLink:      { label: 'Recording',   sortVal: null },
+};
+
+function renderCallDetail(data) {
+  const detail = data || { total: 0, truncated: 0, records: [] };
+  document.getElementById('call-detail-count').textContent = detail.total || 0;
+  document.getElementById('call-detail-note').textContent = detail.truncated
+    ? `showing the ${detail.records.length.toLocaleString()} most recent of ${detail.total.toLocaleString()} — narrow the date range to see the rest`
+    : '';
+  renderCallDetailTable(detail.records);
+}
+
+function renderCallDetailTable(records) {
+  const container = document.getElementById('call-detail-table');
+  if (!records || records.length === 0) {
+    container.innerHTML = '<div class="empty">No calls for this period</div>';
+    return;
+  }
+
+  // Filter
+  const q = callSearch.toLowerCase().trim();
+  const filtered = q ? records.filter((c) =>
+    [c.agentName, c.direction, formatCallStatus(c.status), c.callerNumber, c.callerName, c.companyName, c.caseNumber]
+      .some((v) => v && String(v).toLowerCase().includes(q))
+  ) : records;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty">No calls match your search</div>';
+    return;
+  }
+
+  // Sort
+  let sorted = filtered;
+  if (callSortKey && CALL_COLUMNS[callSortKey]?.sortVal) {
+    const sv = CALL_COLUMNS[callSortKey].sortVal;
+    sorted = [...filtered].sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return callSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return callSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const colKeys = Object.keys(CALL_COLUMNS);
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of colKeys) {
+    const col = CALL_COLUMNS[key];
+    if (!col.sortVal) {
+      html += `<th>${col.label}</th>`;
+      continue;
+    }
+    const active = callSortKey === key;
+    const indicator = active ? (callSortDir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-call-sort="${key}">${col.label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const c of sorted) {
+    const caseCell = c.caseNumber && c.caseId
+      ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${encodeURIComponent(c.caseId)}/view" target="_blank" rel="noopener">${escapeHtml(c.caseNumber)}</a>`
+      : escapeHtml(c.caseNumber || '--');
+    const recordingCell = c.callLink
+      ? `<a href="${escapeHtml(c.callLink)}" target="_blank" rel="noopener">Listen</a>`
+      : '--';
+    // Over-8-hour calls are excluded from the stats above; mark them here so the
+    // numbers reconcile instead of looking like a discrepancy.
+    const durationCell = c.duration == null
+      ? '--'
+      : `${formatSeconds(c.duration)}${c.flagged ? ' <span class="text-danger small">(flagged)</span>' : ''}`;
+    html += `<tr>
+      <td>${formatCaseDate(c.startTime)}</td>
+      <td>${escapeHtml(c.agentName || '--')}</td>
+      <td>${escapeHtml(c.direction)}${c.callbackRequested ? ' <span class="text-muted small">(callback)</span>' : ''}</td>
+      <td>${escapeHtml(formatCallStatus(c.status))}</td>
+      <td>${escapeHtml(c.callerNumber || '--')}</td>
+      <td>${escapeHtml(c.callerName || '--')}</td>
+      <td>${escapeHtml(c.companyName || '--')}</td>
+      <td>${durationCell}</td>
+      <td>${c.queueDuration == null ? '--' : formatSeconds(c.queueDuration)}</td>
+      <td>${caseCell}</td>
+      <td>${recordingCell}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-call-sort]');
+    if (!th) return;
+    const key = th.dataset.callSort;
+    if (callSortKey === key) {
+      if (callSortDir === 'asc') {
+        callSortDir = 'desc';
+      } else {
+        callSortKey = null;
+        callSortDir = 'asc';
+      }
+    } else {
+      callSortKey = key;
+      callSortDir = 'asc';
+    }
+    renderCallDetailTable(reportData.callDetail.records);
+  });
+}
+
 // -- Render: Salesforce Cases --
 let caseSearch = '';
 let caseSortKey = 'createdDate';
@@ -723,6 +871,24 @@ function exportCSV() {
   }
   blank();
 
+  // Calls Detail
+  {
+    const cd = reportData.callDetail || { total: 0, truncated: 0, records: [] };
+    row('CALLS DETAIL');
+    if (cd.truncated) row(`Note: showing ${cd.records.length} most recent of ${cd.total} calls`);
+    row('Date / Time', 'Agent', 'Direction', 'Callback', 'Status', 'Caller', 'Name', 'Company', 'Duration', 'Queue', 'Flagged', 'Case #', 'Recording');
+    for (const c of cd.records) {
+      row(
+        formatCaseDate(c.startTime), c.agentName, c.direction, c.callbackRequested ? 'Yes' : '',
+        formatCallStatus(c.status), c.callerNumber || '', c.callerName || '', c.companyName || '',
+        c.duration == null ? '' : formatSeconds(c.duration),
+        c.queueDuration == null ? '' : formatSeconds(c.queueDuration),
+        c.flagged ? 'Yes' : '', c.caseNumber || '', c.callLink || ''
+      );
+    }
+    blank();
+  }
+
   // Cases Summary
   row('SALESFORCE CASES - SUMMARY');
   row('Total', 'Open', 'Closed');
@@ -830,6 +996,34 @@ function exportPDF() {
   }
   yPos = doc.lastAutoTable.finalY + 8;
 
+  // Calls Detail — trimmed to the columns that fit landscape A4; the CSV export
+  // carries the full set including caller name and recording links.
+  {
+    const cd = reportData.callDetail || { total: 0, truncated: 0, records: [] };
+    if (cd.records.length > 0) {
+      sectionHeading('Calls Detail');
+      if (cd.truncated) {
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(`Showing ${cd.records.length} most recent of ${cd.total} calls.`, 14, yPos);
+        doc.setTextColor(0);
+        yPos += 5;
+      }
+      doc.autoTable({
+        ...tableOpts, startY: yPos,
+        head: [['Date / Time', 'Agent', 'Direction', 'Status', 'Caller', 'Company', 'Duration', 'Queue', 'Case #']],
+        body: cd.records.map((c) => [
+          formatCaseDate(c.startTime), c.agentName, c.callbackRequested ? `${c.direction} (cb)` : c.direction,
+          formatCallStatus(c.status), c.callerNumber || '--', c.companyName || '--',
+          c.duration == null ? '--' : formatSeconds(c.duration),
+          c.queueDuration == null ? '--' : formatSeconds(c.queueDuration),
+          c.caseNumber || '--',
+        ]),
+      });
+      yPos = doc.lastAutoTable.finalY + 8;
+    }
+  }
+
   // Cases Summary
   sectionHeading('Salesforce Cases - Summary');
   const cs = reportData.cases.stats;
@@ -895,6 +1089,7 @@ async function generateReport() {
     renderDuration(reportData.duration, reportData.teamDuration);
     renderFlaggedCalls(reportData.flaggedCalls);
     renderAgentActivity(reportData.agentActivity);
+    renderCallDetail(reportData.callDetail);
     renderCases(reportData.cases);
     // Show container before rendering charts so Chart.js can measure dimensions
     document.getElementById('reports-data').style.display = '';
@@ -937,7 +1132,7 @@ async function init() {
     document.getElementById('reports-content').style.display = '';
 
     // Set max dates to today
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = toLocalISODate(new Date());
     document.getElementById('start-date').max = todayStr;
     document.getElementById('end-date').max = todayStr;
 
@@ -990,6 +1185,12 @@ async function init() {
     };
     document.getElementById('start-date').addEventListener('change', onCustomDateChange);
     document.getElementById('end-date').addEventListener('change', onCustomDateChange);
+
+    // Calls Detail search
+    document.getElementById('call-detail-search').addEventListener('input', (e) => {
+      callSearch = e.target.value;
+      if (reportData?.callDetail?.records) renderCallDetailTable(reportData.callDetail.records);
+    });
 
     // Case search
     document.getElementById('case-search').addEventListener('input', (e) => {

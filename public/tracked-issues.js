@@ -92,13 +92,78 @@
     return typeof i.summary === 'string' && i.summary.trim().toLowerCase() === 'template';
   }
 
+  function renderGroup(title, items, groupKey) {
+    if (!items.length) return '';
+    const rows = items.map(rowHtml).join('');
+    return `
+      <div class="tracked-issue-group" data-group="${groupKey}">
+        <div class="tracked-issue-group-header">${title}</div>
+        <div class="tracked-issue-group-list" data-group-list="${groupKey}">${rows}</div>
+      </div>`;
+  }
+
   function render() {
     const list = filtered();
     if (!list.length) {
       listEl.innerHTML = '<div class="empty">No tracked issues.</div>';
+      initSortable();
       return;
     }
-    listEl.innerHTML = list.map(rowHtml).join('');
+    if (currentFilter === 'active') {
+      const open = list.filter((i) => i.state === 'open' || (!i.state && i.active));
+      const fixing = list.filter((i) => i.state === 'fix_incoming');
+      const parts = [];
+      parts.push(renderGroup('Open', open, 'open'));
+      parts.push(renderGroup('Fix Incoming', fixing, 'fix_incoming'));
+      // Handle the case where both sections are empty individually but list
+      // wasn't (e.g. legacy rows with no state).
+      const html = parts.join('') || `<div class="tracked-issue-group" data-group="all"><div class="tracked-issue-group-list" data-group-list="all">${list.map(rowHtml).join('')}</div></div>`;
+      listEl.innerHTML = html;
+    } else if (currentFilter === 'resolved') {
+      listEl.innerHTML = renderGroup('Resolved', list, 'resolved');
+    } else {
+      // 'all' — render as one group but disable drag since ordering across
+      // states doesn't make sense.
+      listEl.innerHTML = `<div class="tracked-issue-group" data-group="all"><div class="tracked-issue-group-list" data-group-list="all" data-nodrag="1">${list.map(rowHtml).join('')}</div></div>`;
+    }
+    initSortable();
+  }
+
+  let sortableInstances = [];
+  function initSortable() {
+    // Tear down previous instances before re-rendering.
+    for (const s of sortableInstances) { try { s.destroy(); } catch {} }
+    sortableInstances = [];
+    if (!(isSupervisor || isSuperAdmin)) return;
+    if (typeof Sortable === 'undefined') return;
+    const groups = listEl.querySelectorAll('[data-group-list]');
+    groups.forEach((groupEl) => {
+      if (groupEl.dataset.nodrag === '1') return;
+      const instance = Sortable.create(groupEl, {
+        handle: '.tracked-issue-drag-handle',
+        animation: 150,
+        ghostClass: 'tracked-issue-drag-ghost',
+        dragClass: 'tracked-issue-drag-drag',
+        onEnd: async (evt) => {
+          if (evt.oldIndex === evt.newIndex) return;
+          const ids = Array.from(groupEl.querySelectorAll('.tracked-issue-card'))
+            .map((el) => el.dataset.id);
+          try {
+            const res = await fetch(`${basePath}/api/tracked-issues/reorder`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            refresh();
+          } catch (e) {
+            alert(e.message || 'Failed to save order');
+            refresh();
+          }
+        },
+      });
+      sortableInstances.push(instance);
+    });
   }
 
   function stateLabel(st) {
@@ -120,6 +185,12 @@
     if (i.severity != null) meta.push(`Sev ${escapeHtml(i.severity)}`);
     if (i.status) meta.push(`Status: ${escapeHtml(i.status)}`);
     const canEdit = isSupervisor || isSuperAdmin;
+    const dragHandle = canEdit
+      ? `<span class="tracked-issue-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">&#x2630;</span>`
+      : '';
+    const deleteBtn = canEdit
+      ? `<button type="button" class="tracked-issue-delete" data-action="delete" data-id="${escapeHtml(i.id)}" title="Delete" aria-label="Delete">&times;</button>`
+      : '';
     // State-transition buttons: only show transitions that make sense from the
     // current state. Edit always available; Delete always available (hard-remove).
     let transitions = '';
@@ -139,7 +210,6 @@
       <div class="tracked-issue-actions">
         <button type="button" class="btn btn-outline-primary btn-sm" data-action="edit" data-id="${escapeHtml(i.id)}">Edit</button>
         ${transitions}
-        <button type="button" class="btn btn-outline-danger btn-sm" data-action="delete" data-id="${escapeHtml(i.id)}">Delete</button>
       </div>` : '';
     const detailRows = [];
     if (i.description) detailRows.push(['Description of Issue', i.description]);
@@ -150,6 +220,8 @@
       : '<em>No additional details.</em>';
     return `
       <div class="tracked-issue-card${st === 'resolved' ? ' cleared' : ''}" data-id="${escapeHtml(i.id)}">
+        ${dragHandle}
+        ${deleteBtn}
         <div class="tracked-issue-head">
           <div class="tracked-issue-summary">${escapeHtml(i.summary)}</div>
           ${badge}

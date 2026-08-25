@@ -1,17 +1,98 @@
 body { background: #e8eaed; margin: 0; }
 
-/* Announcement banner */
-.announcement-banner { background: #fef3c7; color: #92400e; border-bottom: 2px solid #f59e0b; padding: 8px 16px; font-size: 0.9rem; }
-.announcement-banner .announcement-item { display: flex; align-items: flex-start; gap: 12px; padding: 4px 0; }
-.announcement-banner .announcement-item + .announcement-item { border-top: 1px dashed #f59e0b66; }
-.announcement-banner .announcement-text { flex: 1; min-width: 0; }
-.announcement-banner .announcement-title { font-weight: 700; }
-.announcement-banner .announcement-body { white-space: pre-wrap; }
-.announcement-banner .announcement-meta { font-size: 0.75rem; opacity: 0.75; margin-top: 2px; }
-.announcement-banner .announcement-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.announcement-banner .announcement-ack-pill { background: #16a34a; color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; align-self: center; }
-body.dark .announcement-banner { background: #3d2e08; color: #fde68a; border-bottom-color: #b45309; }
-body.dark .announcement-banner .announcement-item + .announcement-item { border-top-color: #b4530966; }
+/* Announcement banner
+   Sits between the topbar and the tracked-issues ticker. Compact by
+   design: title + a 2-line clamp on body + inline actions. */
+.announcement-banner {
+  display: block;
+  width: 100vw;
+  box-sizing: border-box;
+  margin-left: calc(50% - 50vw);
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-bottom: 1px solid #bfdbfe;
+  font-size: 0.875rem;
+  padding: 0;
+}
+.announcement-banner .announcement-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-left: 3px solid #3b82f6;
+}
+.announcement-banner .announcement-item + .announcement-item {
+  border-top: 1px solid #dbeafe;
+}
+.announcement-banner .announcement-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.announcement-banner .announcement-title {
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.announcement-banner .announcement-body {
+  flex: 1;
+  min-width: 0;
+  color: #1e40af;
+  /* 2-line clamp so long announcements don't blow up the header. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+.announcement-banner .announcement-body p { margin: 0; }
+.announcement-banner .announcement-body p + p { margin-top: 2px; }
+.announcement-banner .announcement-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.announcement-banner .announcement-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.announcement-banner .announcement-ack-pill {
+  background: #16a34a;
+  color: #fff;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.announcement-banner .announcement-files {
+  margin: 0;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.announcement-banner .announcement-file-link {
+  padding: 1px 6px;
+  font-size: 0.72rem;
+}
+
+body.dark .announcement-banner {
+  background: #0f1e33;
+  color: #dbeafe;
+  border-bottom-color: #1e3a5f;
+}
+body.dark .announcement-banner .announcement-item { border-left-color: #60a5fa; }
+body.dark .announcement-banner .announcement-item + .announcement-item {
+  border-top-color: #1e3a5f;
+}
+body.dark .announcement-banner .announcement-body { color: #93c5fd; }
+body.dark .announcement-banner .announcement-meta { color: #94a3b8; }
 
 /* Announcement list modal */
 .announcement-list-item { padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 10px; background: #fff; }
@@ -739,3 +820,171 @@ body.dark .issue-chip[data-state="fix_incoming"]:focus {
 body.dark .state-badge.state-open { background: #3a1616; color: #fecaca; }
 body.dark .state-badge.state-fix-incoming { background: #14432a; color: #86efac; }
 body.dark .state-badge.state-resolved { background: #1f2937; color: #9ca3af; }
+
+/* ---------- Tracked issues drag/drop + section headers + X delete ---------- */
+.tracked-issue-group + .tracked-issue-group { margin-top: 18px; }
+.tracked-issue-group-header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  padding: 6px 4px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 8px;
+}
+body.dark .tracked-issue-group-header {
+  color: #9ca3af;
+  border-bottom-color: #1a2d42;
+}
+
+.tracked-issue-card {
+  position: relative;
+  padding-right: 34px; /* room for the X in the corner */
+}
+.tracked-issue-drag-handle {
+  position: absolute;
+  left: -18px;
+  top: 12px;
+  color: #9ca3af;
+  cursor: grab;
+  font-size: 0.9rem;
+  user-select: none;
+  padding: 4px 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tracked-issue-card:hover .tracked-issue-drag-handle { opacity: 1; }
+.tracked-issue-drag-handle:active { cursor: grabbing; }
+body.dark .tracked-issue-drag-handle { color: #6b7280; }
+
+.tracked-issue-delete {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.tracked-issue-delete:hover, .tracked-issue-delete:focus {
+  color: #dc2626;
+  background: #fee2e2;
+  outline: none;
+}
+body.dark .tracked-issue-delete { color: #6b7280; }
+body.dark .tracked-issue-delete:hover, body.dark .tracked-issue-delete:focus {
+  color: #fca5a5;
+  background: #3a1616;
+}
+
+/* Sortable-provided drag feedback classes. */
+.tracked-issue-drag-ghost {
+  opacity: 0.4;
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.tracked-issue-drag-drag {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+body.dark .tracked-issue-drag-ghost {
+  background: #1a2d42;
+  border-color: #3b82f6;
+}
+
+/* Attached files on announcements — small clickable chips. */
+.announcement-files, .ann-body + .announcement-files {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.announcement-file-link {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.8rem;
+  text-decoration: none;
+  border: 1px solid #c7d2fe;
+}
+.announcement-file-link:hover {
+  background: #c7d2fe;
+  text-decoration: underline;
+}
+.announcement-file-link::before {
+  content: "📎 ";
+  margin-right: 2px;
+}
+body.dark .announcement-file-link {
+  background: #1e293b;
+  color: #93c5fd;
+  border-color: #334155;
+}
+body.dark .announcement-file-link:hover {
+  background: #334155;
+}
+.announcement-file-size {
+  opacity: 0.7;
+  font-size: 0.72rem;
+}
+/* Image attachments preview inline; click opens the full-size file. */
+.announcement-file-thumb {
+  display: inline-block;
+  line-height: 0;
+  border-radius: 4px;
+  border: 1px solid #c7d2fe;
+  overflow: hidden;
+}
+.announcement-file-thumb img {
+  height: 72px;
+  width: auto;
+  max-width: 160px;
+  object-fit: cover;
+  display: block;
+}
+.announcement-file-thumb:hover {
+  border-color: #6366f1;
+}
+.announcement-banner .announcement-file-thumb img {
+  height: 32px;
+  max-width: 64px;
+}
+body.dark .announcement-file-thumb {
+  border-color: #334155;
+}
+body.dark .announcement-file-thumb:hover {
+  border-color: #60a5fa;
+}
+
+/* Dark-mode styling for the native file input's Choose Files button.
+   Bootstrap styles the surrounding control but the button itself lives in
+   the ::file-selector-button pseudo-element and inherits the OS defaults,
+   which look washed out on our dark background. */
+body.dark input[type="file"].form-control,
+body.dark input[type="file"].form-control-sm {
+  background: #0e1a2b;
+  color: #f0f2f3;
+  border-color: #1a2d42;
+}
+body.dark input[type="file"].form-control::file-selector-button,
+body.dark input[type="file"].form-control-sm::file-selector-button {
+  background: #223a55;
+  color: #f0f2f3;
+  border: 1px solid #2a3f55;
+  border-radius: 4px;
+  padding: 4px 12px;
+  margin-right: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+body.dark input[type="file"].form-control::file-selector-button:hover,
+body.dark input[type="file"].form-control-sm::file-selector-button:hover {
+  background: #2d4a6e;
+}

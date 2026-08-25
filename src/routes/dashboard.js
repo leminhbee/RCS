@@ -1,9 +1,11 @@
-const router = require('express').Router();
+const express = require('express');
+const router = express.Router();
 const dashboardController = require('../controllers/dashboard');
 const reportsController = require('../controllers/reports');
 const atp = require('../ATP');
 const ava = require('../AVA');
 const websocket = require('../helpers/websocket');
+const announcementFiles = require('../helpers/announcementFiles');
 const { createLogger } = require('../helpers/logger');
 
 const announcementsLogger = createLogger('announcements');
@@ -380,26 +382,131 @@ router.get('/api/announcements', async (req, res) => {
   }
 });
 
-router.post('/api/announcements', requireSupervisor, async (req, res) => {
+router.post('/api/announcements', express.json({ limit: '32mb' }), requireSupervisor, async (req, res) => {
   const title = String(req.body?.title || '').trim();
   const body = String(req.body?.body || '').trim();
+  const files = Array.isArray(req.body?.files) ? req.body.files : [];
+  const totalFileBytes = files.reduce((n, f) => n + (typeof f.base64 === 'string' ? Math.floor(f.base64.length * 0.75) : 0), 0);
+  announcementsLogger.info({
+    userId: req.session.user.id,
+    userName: userDisplayName(req.session.user),
+    title,
+    bodyLen: body.length,
+    fileCount: files.length,
+    totalFileBytes,
+  }, 'Announcement POST received');
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
   if (title.length > 200) return res.status(400).json({ error: 'title must be 200 chars or fewer' });
+  if (totalFileBytes > announcementFiles.MAX_TOTAL_BYTES) {
+    const mb = (totalFileBytes / (1024 * 1024)).toFixed(1);
+    const max = Math.floor(announcementFiles.MAX_TOTAL_BYTES / (1024 * 1024));
+    return res.status(413).json({ error: `Attachments total ${mb}MB — max ${max}MB combined.` });
+  }
   try {
     const created = await atp.announcements.create({
       title,
       body,
       createdBy: req.session.user.id,
     });
-    // Fire-and-forget Slack canvas post.
-    ava.announcements
-      .post(title, body, userDisplayName(req.session.user))
-      .catch((err) => announcementsLogger.error({ err: err.message }, 'AVA announcement post failed'));
+    // Keep our own copy of the attachments so they can be viewed on the
+    // dashboard. A Slack permalink can't do that job — it needs a Slack session
+    // to open and a bearer token to inline, so it only ever worked as a bounce
+    // into Slack. Stored before the Slack post so an attachment survives on the
+    // dashboard even when Slack delivery fails.
+    let storedFiles = [];
+    try {
+      storedFiles = await announcementFiles.save(created.id, files);
+    } catch (err) {
+      announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to store announcement attachments');
+    }
+    // Post to cscChat via AVA (with optional files) and wait for the outcome,
+    // so the poster is told whether Slack actually received it. The row is
+    // already saved either way — a Slack failure downgrades the response to a
+    // warning rather than failing the request.
+    let slackPosted = true;
+    let slackError = null;
+    try {
+      const r = await ava.announcements.post(title, body, userDisplayName(req.session.user), files);
+      // Keep the permalink next to our own copy for reference. Slack returns
+      // uploads in the order they were sent.
+      const permalinks = Array.isArray(r && r.permalinks) ? r.permalinks : [];
+      permalinks.forEach((link, i) => {
+        if (storedFiles[i]) storedFiles[i].slackPermalink = link;
+      });
+    } catch (err) {
+      slackPosted = false;
+      slackError = err.message;
+      announcementsLogger.error({ err: err.message, id: created.id, fileCount: files.length, totalFileBytes }, 'AVA announcement post failed');
+    }
+    if (storedFiles.length) {
+      await atp.announcements
+        .update(created.id, { fileUrls: storedFiles })
+        .catch((err) => announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to persist announcement fileUrls'));
+    }
     // Push to all open dashboards.
     websocket.broadcast().catch(() => {});
-    res.json(created);
+    res.json({ ...created, fileUrls: storedFiles, slackPosted, slackError });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create announcement' });
+  }
+});
+
+// Serves an announcement attachment from disk. The whole dashboard router
+// sits behind requireAuth, so these are never publicly reachable. The stored
+// filename comes from the row's own metadata rather than the URL, so :idx can't
+// be walked outside the announcement's directory.
+router.get('/api/announcements/:id/files/:idx', async (req, res) => {
+  const { id, idx } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(404).json({ error: 'Attachment not found' });
+  try {
+    const announcement = await atp.announcements.fetchOne(id);
+    if (!announcement) return res.status(404).json({ error: 'Attachment not found' });
+    const file = announcementFiles.resolve(id, idx, announcement.fileUrls);
+    if (!file) return res.status(404).json({ error: 'Attachment not found' });
+    // Images and PDFs preview in the browser; anything else downloads under its
+    // original name.
+    const inline = /^image\//.test(file.mimeType) || file.mimeType === 'application/pdf';
+    res.type(file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`
+    );
+    res.sendFile(file.path, (err) => {
+      if (!err) return;
+      announcementsLogger.error({ err: err.message, id, idx }, 'Failed to send announcement attachment');
+      if (!res.headersSent) res.status(404).json({ error: 'Attachment not found' });
+    });
+  } catch (error) {
+    announcementsLogger.error({ err: error.message, id, idx }, 'Error resolving announcement attachment');
+    res.status(500).json({ error: 'Failed to fetch attachment' });
+  }
+});
+
+// Permanent delete, as opposed to the soft delete below that only flips
+// active=false. Acknowledgement rows cascade in the database; the attachment
+// files on disk are ours to clean up.
+router.delete('/api/announcements/:id/permanent', requireSupervisor, async (req, res) => {
+  const { id } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(400).json({ error: 'Invalid announcement id' });
+  try {
+    await atp.announcements.destroy(id);
+    await announcementFiles.remove(id);
+    announcementsLogger.info({
+      id,
+      userId: req.session.user.id,
+      userName: userDisplayName(req.session.user),
+    }, 'Announcement permanently deleted');
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.status === 404) {
+      // Already gone upstream — drop any files we're still holding so a stale
+      // row can't strand its attachments on disk.
+      await announcementFiles.remove(id);
+      return res.status(404).json({ error: 'Announcement not found' });
+    }
+    announcementsLogger.error({ err: error.message, id }, 'Failed to permanently delete announcement');
+    res.status(500).json({ error: 'Failed to delete announcement' });
   }
 });
 
@@ -610,6 +717,25 @@ router.patch('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update tracked issue' });
+  }
+});
+
+// Batch reorder — supervisor-only. Takes an ordered array of IDs and
+// assigns sort_order = index * 100 + 100 in that order. The frontend groups
+// this call per (state) so drag-and-drop only affects rows within the same
+// state bucket.
+router.post('/api/tracked-issues/reorder', requireSupervisor, async (req, res) => {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : null;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      await atp.trackedIssues.update(ids[i], { sortOrder: (i + 1) * 100 });
+    }
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    trackedIssuesLogger.error({ err: error.message }, 'Reorder failed');
+    res.status(500).json({ error: 'Failed to reorder tracked issues' });
   }
 });
 

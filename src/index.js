@@ -21,7 +21,7 @@ const mutex = new Mutex();
 
 // --- Body parsers ---
 // JSON
-app.use(express.json());
+app.use(express.json({ limit: '32mb' }));
 // text/json (some webhooks may send JSON but with text/json header)
 app.use(express.text({ type: 'text/json' }));
 // URL-encoded (HTML form submissions)

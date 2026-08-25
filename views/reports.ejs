@@ -13,7 +13,6 @@
 <body>
 
   <%- include('partials/topbar', { pageName: 'Reports' }) %>
-  <%- include('partials/issues-ticker') %>
   <%- include('partials/tracked-issue-modals') %>
   <%- include('partials/preferences-modal') %>
   <%- include('partials/user-flags-modal') %>
@@ -45,6 +44,8 @@
               <option value="">All Team</option>
             </select>
             <select class="form-select form-select-sm" id="date-range-select" style="width:auto">
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
               <option value="thisWeek">This Week</option>
               <option value="lastWeek">Last Week</option>
               <option value="thisMonth" selected>This Month</option>
@@ -136,6 +137,19 @@
           </div>
         </div>
 
+        <!-- Calls Detail -->
+        <div class="card mb-3">
+          <div class="card-header d-flex align-items-center gap-2">
+            <strong>Calls Detail</strong>
+            <span class="text-muted small" id="call-detail-note"></span>
+            <span class="count ms-auto" id="call-detail-count">0</span>
+          </div>
+          <div class="card-body">
+            <input type="search" id="call-detail-search" class="form-control form-control-sm mb-2" style="max-width:300px" placeholder="Search calls..." autocomplete="off">
+            <div class="table-responsive" id="call-detail-table"></div>
+          </div>
+        </div>
+
         <!-- Salesforce Cases -->
         <div class="card mb-3">
           <div class="card-header d-flex align-items-center gap-2">
@@ -167,7 +181,6 @@
   <script src="/dashboard/dashboard-settings-panel.js"></script>
   <script src="/dashboard/announcements-shared.js"></script>
   <script src="/dashboard/announcement-compose.js"></script>
-  <script src="/dashboard/issues-ticker.js"></script>
   <script src="/dashboard/tracked-issues-compose.js"></script>
   <script src="/dashboard/reports.js"></script>
 </body>

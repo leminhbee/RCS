@@ -19,6 +19,65 @@
 (() => {
   window.rcs = window.rcs || {};
 
+  // ---- Global 401 handler ----
+  // Any authenticated fetch that comes back 401 means the session expired.
+  // Server-side we now return 401 JSON on API routes (see authMiddleware.js)
+  // instead of a 302 redirect to /auth/login. Here we intercept every 401,
+  // show a one-time banner, and reload so the browser goes through the
+  // normal login flow. First-response wins — subsequent 401s are ignored
+  // to avoid stacking banners while the reload is in flight.
+  let sessionExpiredHandled = false;
+  function handleSessionExpired(detail) {
+    if (sessionExpiredHandled) return;
+    sessionExpiredHandled = true;
+
+    let banner = document.getElementById('rcs-session-expired-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'rcs-session-expired-banner';
+      Object.assign(banner.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        zIndex: '9999',
+        background: '#b91c1c',
+        color: '#ffffff',
+        padding: '10px 16px',
+        fontWeight: '600',
+        textAlign: 'center',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+      });
+      document.body.appendChild(banner);
+    }
+    banner.textContent = detail || 'Session expired. Reloading to sign in…';
+    setTimeout(() => { location.reload(); }, 2000);
+  }
+
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = async function patchedFetch(input, init) {
+    const res = await _origFetch(input, init);
+    // Only intercept same-origin API responses. Third-party fetches (e.g.
+    // Slack file downloads via permalink) shouldn't hijack the page.
+    try {
+      const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+      const sameOrigin = !urlStr || urlStr.startsWith('/') || urlStr.startsWith(location.origin);
+      if (res.status === 401 && sameOrigin) {
+        // Clone so callers can still read the body if they want.
+        let detail = '';
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const j = await res.clone().json();
+            detail = j && (j.error || j.message) || '';
+          }
+        } catch {}
+        handleSessionExpired(detail);
+      }
+    } catch {}
+    return res;
+  };
+
   // ---- theme toggle (unchanged behavior) ----
   const themeMenu = document.getElementById('theme-toggle-menu');
   const themeIcon = document.getElementById('theme-toggle-icon');
