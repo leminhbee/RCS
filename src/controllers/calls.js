@@ -27,6 +27,16 @@ const answer = async (req) => {
   const { messageId, body, logger, callRecord } = req;
 
   try {
+    // Someone picked this call up, so any pending callback expiration is void.
+    // Agent-dialed callbacks never fire the `ringing` webhook (the outbound leg
+    // carries a different call_id and goes straight to answer), so this is the
+    // only hook that cancels the timer for them. Keyed on the call record, not
+    // the incoming call_id, and placed ahead of the callsActive check — the
+    // callback was served regardless of whether we track this agent's calls.
+    if (callRecord) {
+      clearCallbackTimer(callRecord.id);
+    }
+
     // Regular user checks
     if (!body.alulaUser?.callsActive) return; // Early return if user is not activated for call tracking
 

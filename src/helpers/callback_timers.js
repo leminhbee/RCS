@@ -13,6 +13,29 @@ async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) 
 
   const timer = setTimeout(async () => {
     try {
+      // Re-read current state before expiring. The call may have been answered,
+      // completed, or removed since the timer was armed, and the closure's copy
+      // of callRecord is stale by up to CALLBACK_TIMEOUT.
+      const current = await atp.calls.fetchOne(callRecord.id);
+
+      if (!current || current.status !== 'CALLBACK_REQUESTED') {
+        logger.info(
+          createQueueLog({
+            operation: 'callback',
+            subOperation: 'CALLBACK_EXPIRE_SKIPPED',
+            callerNumber: callRecord.callerNumber,
+            callId: callRecord.callId,
+            callRecordId: callRecord.id,
+            caseId: callRecord.salesforceCaseId,
+            data: {
+              message: 'Callback timer expired but call is no longer awaiting callback — no action taken',
+              currentStatus: current ? current.status : 'NOT_FOUND',
+            },
+          })
+        );
+        return;
+      }
+
       await atp.calls.update(callRecord.id, {
         status: 'CALLBACK_FAILED',
         endTime: new Date(),
