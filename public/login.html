@@ -100,6 +100,9 @@
     if (params.get('error') === 'sso') {
       errorMsg.textContent = 'This account uses SSO. Please sign in with Microsoft.';
       errorMsg.style.display = 'block';
+    } else if (params.get('error') === 'inactive') {
+      errorMsg.textContent = 'This account has been deactivated. Please contact your supervisor.';
+      errorMsg.style.display = 'block';
     } else if (params.get('error')) {
       errorMsg.style.display = 'block';
     }
@@ -153,6 +156,19 @@
 
           if (res.status === 404) {
             errorNotFound.style.display = 'block';
+            return;
+          }
+
+          // Deactivated account — show the server's message rather than the
+          // generic "something went wrong", so the user knows to ask a supervisor.
+          if (res.status === 403) {
+            let msg = 'This account has been deactivated. Please contact your supervisor.';
+            try {
+              const body = await res.json();
+              if (body && body.error) msg = body.error;
+            } catch {}
+            errorMsg.textContent = msg;
+            errorMsg.style.display = 'block';
             return;
           }
 

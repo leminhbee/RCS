@@ -66,10 +66,12 @@ const getReports = async (req, res) => {
       : teamCalls;
 
     // Build user list for dropdown (only active agents). Self-only users get an
-    // empty list so the UI can't offer them a way to switch agents.
+    // empty list so the UI can't offer them a way to switch agents. Deactivated
+    // users drop out of the dropdown, but stay in userMap above so their name
+    // still renders on the calls they handled while they were here.
     const userList = canViewAll
       ? users
-        .filter((u) => u.callsActive)
+        .filter((u) => u.callsActive && u.active !== false)
         .map((u) => ({ id: u.id, name: `${u.nameFirst} ${u.nameLast}`.trim() }))
         .sort((a, b) => a.name.localeCompare(b.name))
       : [];

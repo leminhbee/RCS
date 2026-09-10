@@ -19,6 +19,9 @@ async function initUserFlagsPanel() {
   // Each entry: { ...flagKey: bool, breakMin: int, lunchMin: int }.
   let initialById = new Map();
   let currentById = new Map();
+  // Kept out of the dirty-tracking maps above — Active saves on the spot, so it
+  // must not participate in the Save/Discard batch.
+  let activeById = new Map();
 
   function flagDirty(u, key) { return initialById.get(u.id)[key] !== currentById.get(u.id)[key]; }
   function userHasAnyDirty(u) {
@@ -33,7 +36,55 @@ async function initUserFlagsPanel() {
     return dirtyIds;
   }
 
+  // Activate / deactivate saves immediately rather than joining the Save batch:
+  // it evicts the user's session and drops them off every live dashboard, so a
+  // pending-then-Discard state would misrepresent what has already happened.
+  async function setActive(cb) {
+    const id = cb.dataset.userId;
+    const user = users.find((u) => u.id === id);
+    const name = user ? user.name : 'this user';
+    const active = cb.checked;
+
+    if (!active && !confirm(`Deactivate ${name}?\n\nThey will be hidden from the dashboard and unable to sign in. Their name stays on past calls and reports.`)) {
+      cb.checked = true;
+      return;
+    }
+
+    cb.disabled = true;
+    feedback.textContent = active ? `Reactivating ${name}...` : `Deactivating ${name}...`;
+    feedback.className = 'settings-feedback';
+    try {
+      const r = await fetch(`${basePath}/api/users/${id}/active`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${r.status}`);
+      }
+      activeById.set(id, active);
+      feedback.textContent = active ? `${name} reactivated.` : `${name} deactivated.`;
+      feedback.className = 'settings-feedback text-success';
+      // Re-read so the row reflects whatever the server actually stored.
+      await load();
+    } catch (err) {
+      cb.checked = !active;
+      cb.disabled = false;
+      feedback.textContent = err.message || 'Failed to update user.';
+      feedback.className = 'settings-feedback text-danger';
+    }
+  }
+
   function renderFlagsTab() {
+    // Active is rendered outside the generic flags loop: it isn't a feature gate,
+    // it saves immediately instead of via the Save button, and it needs a confirm.
+    const activeHeader = `<th class="user-flags-col user-flags-active-col">
+        <span class="user-flags-col-label">Active</span>
+        <span class="user-flags-info" tabindex="0" role="button" aria-label="Active info"
+          data-bs-toggle="tooltip" data-bs-placement="top"
+          data-bs-title="On the team. Turning this off hides the user everywhere on the dashboard and blocks sign-in. Saves immediately.">&#9432;</span>
+      </th>`;
     const headerCells = flags
       .map((f) => `<th class="user-flags-col">
         <span class="user-flags-col-label">${f.label}</span>
@@ -43,6 +94,13 @@ async function initUserFlagsPanel() {
       .join('');
     const rowsHtml = users.map((u) => {
       const cur = currentById.get(u.id);
+      const isActive = activeById.get(u.id) !== false;
+      const activeCell = `<td class="user-flags-col user-flags-active-col text-center">
+          <div class="form-check form-switch d-inline-flex">
+            <input class="form-check-input user-flags-active-toggle" type="checkbox"
+              data-user-id="${u.id}"${isActive ? ' checked' : ''}>
+          </div>
+        </td>`;
       const cells = flags.map((f) => {
         const dirty = flagDirty(u, f.key);
         return `<td class="user-flags-col text-center${dirty ? ' user-flags-dirty' : ''}">
@@ -52,8 +110,9 @@ async function initUserFlagsPanel() {
           </div>
         </td>`;
       }).join('');
-      return `<tr>
+      return `<tr class="${isActive ? '' : 'user-flags-inactive'}">
         <td class="user-flags-name">${u.name}${u.email ? `<div class="user-flags-email">${u.email}</div>` : ''}</td>
+        ${activeCell}
         ${cells}
       </tr>`;
     }).join('');
@@ -62,11 +121,15 @@ async function initUserFlagsPanel() {
       <div class="user-flags-table-wrap">
         <table class="table table-sm user-flags-table mb-0">
           <thead>
-            <tr><th class="user-flags-name">User</th>${headerCells}</tr>
+            <tr><th class="user-flags-name">User</th>${activeHeader}${headerCells}</tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
         </table>
       </div>`;
+
+    flagsBody.querySelectorAll('.user-flags-active-toggle').forEach((cb) => {
+      cb.addEventListener('change', () => setActive(cb));
+    });
 
     flagsBody.querySelectorAll('.user-flags-toggle').forEach((cb) => {
       cb.addEventListener('change', () => {
@@ -144,6 +207,7 @@ async function initUserFlagsPanel() {
       users = data.users || [];
       initialById = new Map();
       currentById = new Map();
+      activeById = new Map();
       for (const u of users) {
         const snap = {};
         for (const { key } of flags) snap[key] = !!u[key];
@@ -151,6 +215,7 @@ async function initUserFlagsPanel() {
         snap.lunchMin = secToMin(u.preferredLunchTimer);
         initialById.set(u.id, { ...snap });
         currentById.set(u.id, { ...snap });
+        activeById.set(u.id, u.active !== false);
       }
       renderAll();
       recomputeDirty();

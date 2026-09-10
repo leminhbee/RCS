@@ -97,7 +97,7 @@ async function checkCallbackQueue(logger) {
 }
 
 async function recoverCallbackTimers(logger) {
-  const users = await atp.users.fetchAll({ callsActive: true });
+  const users = await atp.users.fetchAll({ callsActive: true, active: true });
   const hasAvailableAgent = users.some(
     (u) => u.currentStatus === 'AVAILABLE' && !u.supervisor
   );

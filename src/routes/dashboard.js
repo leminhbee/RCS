@@ -8,8 +8,11 @@ const websocket = require('../helpers/websocket');
 const announcementFiles = require('../helpers/announcementFiles');
 const { createLogger } = require('../helpers/logger');
 
+const { invalidateActiveCache } = require('../auth/authMiddleware');
+
 const announcementsLogger = createLogger('announcements');
 const trackedIssuesLogger = createLogger('trackedIssues');
+const usersLogger = createLogger('users');
 const {
   getVisibilityConfig,
   getPermissions,
@@ -93,6 +96,9 @@ router.get('/api/users/flags', requireSupervisor, async (req, res) => {
           email: u.email || '',
           preferredBreakTimer: Number.isFinite(u.preferredBreakTimer) ? u.preferredBreakTimer : 120,
           preferredLunchTimer: Number.isFinite(u.preferredLunchTimer) ? u.preferredLunchTimer : 600,
+          // Deliberately unfiltered above: deactivated users must stay in this
+          // list or there would be no way to reactivate them.
+          active: u.active !== false,
         };
         for (const { key } of USER_FLAGS) row[key] = !!u[key];
         return row;
@@ -121,6 +127,50 @@ router.put('/api/users/:id/flags', requireSupervisor, async (req, res) => {
     res.json({ id: req.params.id, updated: updates, user: updated });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update user flags' });
+  }
+});
+
+// Activate / deactivate a user (supervisors + superAdmins). Kept off the
+// USER_FLAGS registry deliberately: this isn't a feature gate, it has side
+// effects (session eviction, live broadcast) and it needs its own audit line.
+router.put('/api/users/:id/active', requireSupervisor, async (req, res) => {
+  const targetId = req.params.id;
+  const active = !!req.body?.active;
+
+  // Locking yourself out of the dashboard you administer is never intentional.
+  if (req.session.user.id === targetId) {
+    return res.status(400).json({ error: 'You cannot deactivate your own account.' });
+  }
+
+  try {
+    const target = await atp.users.fetchOne(targetId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    // Mirrors the roster filter on GET /api/users/flags — a plain supervisor
+    // manages agents, only a superAdmin can touch another supervisor.
+    if (target.supervisor && !req.session.user.superAdmin) {
+      return res.status(403).json({ error: 'Only a super admin can change a supervisor.' });
+    }
+
+    const updated = await atp.users.update(targetId, { active });
+    // Drop the cached active state so the change lands on the target's very next
+    // request rather than waiting out the recheck interval.
+    invalidateActiveCache(targetId);
+
+    usersLogger.info({
+      targetId,
+      targetName: userDisplayName(target),
+      active,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+    }, active ? 'User reactivated' : 'User deactivated');
+
+    // Push to open dashboards so a deactivated agent drops off the grid live.
+    websocket.broadcast().catch(() => {});
+    res.json({ id: targetId, active, user: updated });
+  } catch (error) {
+    usersLogger.error({ err: error.message, targetId, active }, 'Failed to change user active state');
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 
@@ -192,7 +242,9 @@ router.get('/api/settings/visibility', async (req, res) => {
   try {
     const config = await getVisibilityConfig();
     const users = await atp.users.fetchAll({});
-    const userList = users.map((u) => ({ id: u.id, name: `${u.nameFirst} ${u.nameLast}`.trim() }));
+    const userList = users
+      .filter((u) => u.active !== false)
+      .map((u) => ({ id: u.id, name: `${u.nameFirst} ${u.nameLast}`.trim() }));
     res.json({ config, users: userList, featureTiers: FEATURE_TIERS });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch visibility settings' });
@@ -314,8 +366,11 @@ router.get('/api/announcements/all', async (req, res) => {
     ]);
     const userById = new Map((users || []).map((u) => [u.id, userDisplayName(u)]));
     const isSup = !!(req.session.user.superAdmin || req.session.user.supervisor);
+    // userById above stays unfiltered so createdByName still resolves for
+    // announcements posted by someone who has since been deactivated.
     const eligible = isSup
       ? (users || [])
+          .filter((u) => u.active !== false)
           .filter((u) => !u.supervisor)
           .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
       : null;
@@ -535,7 +590,10 @@ router.get('/api/announcements/:id/acks', requireSupervisor, async (req, res) =>
       atp.announcements.fetchAcks(req.params.id),
       atp.users.fetchAll({}),
     ]);
+    // Deactivated users drop out of the roster — otherwise a departed tech sits
+    // in Pending forever waiting to acknowledge something.
     const eligible = (users || [])
+      .filter((u) => u.active !== false)
       .filter((u) => !u.supervisor)
       .filter((u) => String(u.rcExtension ?? '').startsWith('82'));
     const ackById = new Map((acks || []).map((a) => [a.userId, a.ackedAt]));

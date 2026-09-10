@@ -544,6 +544,16 @@ body.dark .tooltip {
 }
 .user-flags-dirty { background: #fef3c7; }
 .user-flags-table .form-check-input { cursor: pointer; }
+
+/* Active column — ruled off from the feature flags to the right of it, because
+   it isn't one: it controls whether the user exists on the dashboard at all. */
+.user-flags-active-col { border-right: 2px solid #e5e7eb; min-width: 84px; }
+.user-flags-table tbody tr.user-flags-inactive .user-flags-name,
+.user-flags-table tbody tr.user-flags-inactive td { opacity: 0.55; }
+/* Keep the switch itself legible so it can be found and turned back on. */
+.user-flags-table tbody tr.user-flags-inactive .user-flags-active-col { opacity: 1; }
+.user-flags-table tbody tr.user-flags-inactive .user-flags-name { font-style: italic; }
+body.dark .user-flags-active-col { border-right-color: #2a3f55; }
 body.dark .user-flags-table thead th { background: #1a2a3f; border-bottom-color: #2a3f55; color: #cdd5e0; }
 body.dark .user-flags-table tbody tr:hover { background: #0e1e2f; }
 body.dark .user-flags-name { background: #132133; border-right-color: #2a3f55; }

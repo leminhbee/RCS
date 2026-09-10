@@ -70,8 +70,12 @@ const fetchDashboardData = async (date) => {
     }
   }
 
-  // Agents: logged-in users, supervisors only if available or on a call
+  // Agents: logged-in users, supervisors only if available or on a call.
+  // Deactivated users are filtered here rather than in the fetch above so the
+  // userMap below still resolves their name on historical calls, and so a stale
+  // status webhook can't put a departed tech back on the grid.
   const agents = users
+    .filter((u) => u.active !== false)
     .filter((u) => {
       if (OFFLINE_STATUSES.includes(u.currentStatus)) return false;
       if (u.supervisor) return SUPERVISOR_VISIBLE_STATUSES.includes(u.currentStatus);

@@ -5,6 +5,12 @@ const atp = require('../ATP');
 const REDIRECT_URI = `${process.env.APP_BASE_URL}/auth/callback`;
 const SCOPES = ['openid', 'profile', 'email', 'Calendars.Read'];
 
+// Shown to a user whose account a supervisor has deactivated. Checked as
+// `=== false` throughout so an ATP row predating the active column (or an ATP
+// that hasn't been migrated yet) still signs in normally.
+const DEACTIVATED_MESSAGE = 'This account has been deactivated. Please contact your supervisor.';
+const isDeactivated = (user) => user && user.active === false;
+
 function login(_req, res) {
   res.sendFile(path.join(__dirname, '../../public/login.html'));
 }
@@ -21,6 +27,10 @@ async function checkEmail(req, res) {
 
     if (!atpUser) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (isDeactivated(atpUser)) {
+      return res.status(403).json({ error: DEACTIVATED_MESSAGE });
     }
 
     if (atpUser.ssoEnabled) {
@@ -47,6 +57,10 @@ async function localLogin(req, res) {
 
     if (!atpUser) {
       return res.redirect('/auth/login?error=1');
+    }
+
+    if (isDeactivated(atpUser)) {
+      return res.redirect('/auth/login?error=inactive');
     }
 
     if (atpUser.ssoEnabled) {
@@ -121,6 +135,11 @@ async function resetPassword(req, res) {
     await atp.users.update(id, { password, passwordResetRequired: false });
     const updatedUser = await atp.users.fetchOne(id);
 
+    if (isDeactivated(updatedUser)) {
+      req.session.pendingReset = null;
+      return res.redirect('/auth/login?error=inactive');
+    }
+
     req.session.pendingReset = null;
     req.session.user = { name: `${updatedUser.nameFirst} ${updatedUser.nameLast}`.trim(), ...updatedUser };
     res.redirect('/dashboard');
@@ -142,6 +161,12 @@ async function callback(req, res) {
 
     if (!atpUser || !atpUser.ssoEnabled) {
       return res.status(403).send('SSO is not enabled for this account.');
+    }
+
+    // SSO bypasses ATP's own authenticate endpoint entirely, so this is the only
+    // place the Microsoft path can be gated on deactivation.
+    if (isDeactivated(atpUser)) {
+      return res.status(403).send(DEACTIVATED_MESSAGE);
     }
 
     req.session.user = {
