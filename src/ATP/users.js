@@ -77,6 +77,23 @@ async function update(id, data) {
 }
 
 /**
+ * Creates a user record in the ATP API.
+ * Callers must whitelist their own fields: the ATP endpoint passes the body
+ * straight through to the model, so anything reaching here is written as-is.
+ * @param {object} data - The user fields to write.
+ * @returns {Promise<object>} The API response.
+ * @throws {Error} If a network error occurs.
+ */
+async function create(data) {
+  try {
+    const response = await axios.post('/users', data);
+    return response.data;
+  } catch (error) {
+    throw new Error('Error creating user record in ATP: ' + error.message);
+  }
+}
+
+/**
  * Authenticates a user by email and password against the ATP API.
  * ATP handles the bcrypt comparison server-side.
  * @param {string} email - The user's email address.
@@ -99,6 +116,7 @@ async function authenticate(email, password) {
 module.exports = {
   fetchOne,
   fetchAll,
+  create,
   update,
   authenticate,
 };

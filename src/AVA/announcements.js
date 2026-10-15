@@ -1,10 +1,8 @@
-const axios = require('axios');
-const AVA_URL = process.env.AVA_URL;
+const ava = require('./client');
 
 const post = async (title, body, createdByName, files) => {
   try {
-    const { data } = await axios.post(
-      `${AVA_URL}/announcements`,
+    const { data } = await ava.post('/announcements',
       { title, body, createdByName, files: Array.isArray(files) ? files : [] },
       {
         maxBodyLength: 30 * 1024 * 1024,

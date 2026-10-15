@@ -157,6 +157,30 @@ function formatDuration(since) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// Time left on a callback's expiry timer, shown beside the wait time (which
+// still counts from startTime). Returns null for rows that aren't callbacks.
+function callbackTimerInfo(call) {
+  if (!call.callbackRequested) return null;
+  if (!call.callbackExpiresAt) {
+    return {
+      text: 'no timer',
+      cls: 'callback-timer none',
+      title: 'No expiry timer armed — one arms when an agent becomes available. Until then this callback stays in queue.',
+    };
+  }
+  const seconds = Math.ceil((new Date(call.callbackExpiresAt) - Date.now()) / 1000);
+  if (seconds <= 0) {
+    return { text: '0:00', cls: 'callback-timer urgent', title: 'Timer expired — being marked as failed' };
+  }
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return {
+    text: `${m}:${String(s).padStart(2, '0')}`,
+    cls: seconds <= 60 ? 'callback-timer urgent' : 'callback-timer',
+    title: 'Time left before this callback is automatically marked failed',
+  };
+}
+
 function statusClass(status) {
   if (!status) return '';
   return 'status-' + status.toLowerCase().replace(/[\s_]/g, '-');
@@ -275,6 +299,7 @@ function renderQueue() {
     const call = queue[i];
     const tag = call.ringing ? '<span class="status status-ringing">Ringing</span>'
       : call.callbackRequested ? '<span class="callback-tag">Callback</span>' : '';
+    const cbTimer = callbackTimerInfo(call);
     const queueTimesCalledCell = permissions.callCountByNumber ? (() => {
       const counts = dashboardData.liveCallCountByNumber || dashboardData.callCountByNumber;
       const cnt = counts?.[call.callerNumber] || 0;
@@ -288,7 +313,7 @@ function renderQueue() {
       <td>${call.callerNumber || '--'}</td>
       <td>${call.callerName || '--'}</td>
       <td>${call.companyName || '--'}</td>
-      <td class="duration js-duration-wait" data-start="${call.startTime}">${formatDuration(call.startTime)}</td>
+      <td class="duration js-duration-wait" data-start="${call.startTime}"><span class="js-wait-value">${formatDuration(call.startTime)}</span>${cbTimer ? `<span class="js-callback-timer ${cbTimer.cls}" title="${cbTimer.title}">${cbTimer.text}</span>` : ''}</td>
       ${queueTimesCalledCell}
       <td>${tag}</td>
       ${removeCell}
@@ -330,8 +355,17 @@ function renderQueueTick() {
   document.querySelectorAll('#queue-table tbody tr[data-call-id]').forEach((row) => {
     const call = byId.get(row.dataset.callId);
     if (!call) return;
-    const cell = row.querySelector('.js-duration-wait');
+    // Update the wait value and the countdown as separate spans rather than
+    // rewriting the cell, so a text selection in the row survives the tick.
+    const cell = row.querySelector('.js-wait-value');
     if (cell) cell.textContent = formatDuration(call.startTime);
+    const timerEl = row.querySelector('.js-callback-timer');
+    const cbTimer = timerEl && callbackTimerInfo(call);
+    if (timerEl && cbTimer) {
+      timerEl.textContent = cbTimer.text;
+      timerEl.className = `js-callback-timer ${cbTimer.cls}`;
+      timerEl.title = cbTimer.title;
+    }
   });
 }
 
@@ -782,6 +816,9 @@ setInterval(() => {
   if (!selectedDate) {
     renderCallListTick();
   }
+  // Queue stays live even while viewing a past date (the WS handler keeps
+  // agents/queue current), so this runs regardless of selectedDate.
+  window.rcs?.queueAlerts?.check(dashboardData.queue || []);
 }, 1000);
 // Load saved column preferences, then init
 loadColPrefs();

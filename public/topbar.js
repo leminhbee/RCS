@@ -144,6 +144,7 @@
     const rows = [
       { id: 'announcement-menu',  requires: () => isSupervisor || isSuperAdmin },
       { id: 'tracked-issue-menu', requires: () => isSupervisor || isSuperAdmin },
+      { id: 'onboarding-menu',    requires: () => isSupervisor || isSuperAdmin },
       { id: 'user-flags-menu',    requires: () => isSupervisor || isSuperAdmin },
       { id: 'settings-menu',      requires: () => isSuperAdmin },
     ];

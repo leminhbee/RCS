@@ -1,9 +1,8 @@
-const axios = require('axios');
-const AVA_URL = process.env.AVA_URL;
+const ava = require('./client');
 
 const breakEnding = async (slackId, remainingTime) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/notifications/breakEnding`, {
+    const { data } = await ava.post('/notifications/breakEnding', {
       slackId,
       remainingTime,
     });
@@ -15,7 +14,7 @@ const breakEnding = async (slackId, remainingTime) => {
 
 const late = async (slackId, userName, timeOver) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/notifications/late`, {
+    const { data } = await ava.post('/notifications/late', {
       slackId,
       userName,
       timeOver,
@@ -28,7 +27,7 @@ const late = async (slackId, userName, timeOver) => {
 
 const newChat = async (slackId, userName, timeOver) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/notifications/`, {
+    const { data } = await ava.post('/notifications/', {
       slackId,
       userName,
       timeOver,
@@ -41,7 +40,7 @@ const newChat = async (slackId, userName, timeOver) => {
 
 const callbackFailed = async (callerNumber, callerName, companyName) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/notifications/callbackFailed`, {
+    const { data } = await ava.post('/notifications/callbackFailed', {
       callerNumber,
       callerName,
       companyName,

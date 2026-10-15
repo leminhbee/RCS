@@ -1,6 +1,9 @@
 const path = require('path');
 const cca = require('../auth/msalConfig');
 const atp = require('../ATP');
+const { createLogger } = require('../helpers/logger');
+
+const authLogger = createLogger('auth');
 
 const REDIRECT_URI = `${process.env.APP_BASE_URL}/auth/callback`;
 const SCOPES = ['openid', 'profile', 'email', 'Calendars.Read'];
@@ -157,7 +160,38 @@ async function callback(req, res) {
       redirectUri: REDIRECT_URI,
     });
 
-    const atpUser = await atp.users.fetchOne({ microsoftId: tokenResponse.account.localAccountId });
+    const localAccountId = tokenResponse.account.localAccountId;
+    let atpUser = await atp.users.fetchOne({ microsoftId: localAccountId });
+
+    // First SSO sign-in after onboarding: nobody has bound this person's Azure
+    // object id yet, and until something does they cannot sign in at all — the
+    // lookup above is the only way in. So fall back to the token's verified
+    // email and claim that row.
+    //
+    // Deliberately strict, because this is the one place a Microsoft identity
+    // gets attached to an account:
+    //   - exact email only, never a looser match
+    //   - exactly one candidate, never a guess between several
+    //   - only a row with no microsoftId, so an account already bound to a
+    //     different Azure identity can never be re-pointed
+    // The binding itself is written further down, after the SSO-enabled and
+    // deactivation gates have passed.
+    let bindMicrosoftId = false;
+    if (!atpUser) {
+      const email = String(tokenResponse.account.username || '').trim().toLowerCase();
+      if (email) {
+        const all = await atp.users.fetchAll({});
+        const matches = (all || []).filter(
+          (u) => String(u.email || '').trim().toLowerCase() === email
+        );
+        if (matches.length === 1 && !matches[0].microsoftId) {
+          atpUser = matches[0];
+          bindMicrosoftId = true;
+        } else if (matches.length > 1) {
+          authLogger.warn({ email, count: matches.length }, 'SSO first sign-in matched multiple ATP users — refusing to bind');
+        }
+      }
+    }
 
     if (!atpUser || !atpUser.ssoEnabled) {
       return res.status(403).send('SSO is not enabled for this account.');
@@ -167,6 +201,18 @@ async function callback(req, res) {
     // place the Microsoft path can be gated on deactivation.
     if (isDeactivated(atpUser)) {
       return res.status(403).send(DEACTIVATED_MESSAGE);
+    }
+
+    if (bindMicrosoftId) {
+      try {
+        await atp.users.update(atpUser.id, { microsoftId: localAccountId });
+        atpUser = { ...atpUser, microsoftId: localAccountId };
+        authLogger.info({ userId: atpUser.id, email: atpUser.email }, 'Bound Microsoft account on first SSO sign-in');
+      } catch (bindError) {
+        // Non-fatal: they are already authenticated, so let them in and try
+        // again on the next sign-in rather than failing a valid login.
+        authLogger.error({ userId: atpUser.id, err: bindError.message }, 'Failed to persist microsoftId on first SSO sign-in');
+      }
     }
 
     req.session.user = {

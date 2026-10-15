@@ -5,4 +5,5 @@ module.exports = {
   outbound: require('./outbound'),
   announcements: require('./announcements'),
   trackedIssues: require('./trackedIssues'),
+  lookup: require('./lookup'),
 };

@@ -23,6 +23,7 @@ const {
 } = require('../helpers/dashboardAccess');
 const { USER_FLAGS, USER_FLAG_KEY_SET } = require('../helpers/userFlags');
 const { getBufferSeconds, setBufferSeconds, DEFAULT_BUFFER_SECONDS } = require('../helpers/breakLateBuffer');
+const { resolveIdentity } = require('../helpers/identityResolver');
 
 const REMINDER_KEYS = ['preferredBreakTimer', 'preferredLunchTimer'];
 function parseReminderUpdates(payload) {
@@ -39,6 +40,37 @@ function parseReminderUpdates(payload) {
     updates[key] = n;
   }
   if (Object.keys(updates).length === 0) return { error: 'No reminder updates provided' };
+  return { updates };
+}
+
+// Per-supervisor queue alert prefs. Column names are the ATP user attributes;
+// the API speaks the shorter client-facing names.
+const QUEUE_ALERT_DEFAULTS = { enabled: false, queueDepth: 5, waitSeconds: 300, sound: true, sticky: true };
+const QUEUE_ALERT_BOOLS = { enabled: 'queueAlertsEnabled', sound: 'queueAlertSound', sticky: 'queueAlertSticky' };
+function parseQueueAlertUpdates(payload) {
+  // Returns { updates } on success, { error } on failure.
+  if (!payload || typeof payload !== 'object') return { error: 'Invalid payload' };
+  const updates = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (QUEUE_ALERT_BOOLS[key]) {
+      if (typeof value !== 'boolean') return { error: `${key} must be a boolean` };
+      updates[QUEUE_ALERT_BOOLS[key]] = value;
+      continue;
+    }
+    if (key === 'queueDepth' || key === 'waitSeconds') {
+      const n = Number(value);
+      // Floors keep the alert meaningful: a depth of 0 would fire constantly and
+      // a sub-30s wait would fire before the caller has really waited.
+      const [min, max] = key === 'queueDepth' ? [1, 100] : [30, 3600];
+      if (!Number.isFinite(n) || Math.floor(n) !== n || n < min || n > max) {
+        return { error: `${key} must be an integer between ${min} and ${max}` };
+      }
+      updates[key === 'queueDepth' ? 'queueDepthAlert' : 'queueWaitAlert'] = n;
+      continue;
+    }
+    return { error: `Unknown queue alert field: ${key}` };
+  }
+  if (Object.keys(updates).length === 0) return { error: 'No queue alert updates provided' };
   return { updates };
 }
 
@@ -174,6 +206,126 @@ router.put('/api/users/:id/active', requireSupervisor, async (req, res) => {
   }
 });
 
+// --- Onboarding -------------------------------------------------------------
+// Resolve a prospective hire's external system IDs from a name + email. Purely
+// read-only: every source is a lookup, nothing is provisioned anywhere.
+router.post('/api/users/resolve', requireSupervisor, async (req, res) => {
+  const nameFirst = typeof req.body?.nameFirst === 'string' ? req.body.nameFirst.trim() : '';
+  const nameLast = typeof req.body?.nameLast === 'string' ? req.body.nameLast.trim() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+
+  if (!nameFirst || !nameLast) return res.status(400).json({ error: 'First and last name are required.' });
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'A valid email address is required.' });
+
+  try {
+    const result = await resolveIdentity({ nameFirst, nameLast, email });
+    usersLogger.info({
+      email,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+      resolved: Object.fromEntries(Object.entries(result.fields).map(([k, v]) => [k, v.confidence])),
+      errors: Object.keys(result.errors),
+    }, 'Onboarding identity lookup');
+    res.json(result);
+  } catch (error) {
+    usersLogger.error({ err: error.message, email }, 'Onboarding identity lookup failed');
+    res.status(500).json({ error: 'Lookup failed. Try again, or enter the IDs manually.' });
+  }
+});
+
+// Fields a supervisor may set on a new user. Everything absent from this list is
+// left at its ATP default — notably password (set on first sign-in), the queue
+// alert prefs, and the status/login columns the webhooks own. ATP's POST /users
+// writes whatever body it receives straight to the model, so this whitelist is
+// the only thing standing between the modal and an arbitrary column write.
+const CREATE_STRING_FIELDS = ['nameFirst', 'nameLast', 'email', 'rcExtension', 'sfdcId', 'slackId', 'alulaConnectId', 'microsoftId'];
+const CREATE_ROLE_FIELDS = ['supervisor', 'superAdmin'];
+
+router.post('/api/users', requireSupervisor, async (req, res) => {
+  const body = req.body || {};
+  const payload = {};
+
+  for (const key of CREATE_STRING_FIELDS) {
+    const raw = body[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    if (typeof raw !== 'string') return res.status(400).json({ error: `${key} must be a string.` });
+    payload[key] = raw.trim();
+  }
+
+  if (!payload.nameFirst || !payload.nameLast) return res.status(400).json({ error: 'First and last name are required.' });
+  if (!payload.email || !payload.email.includes('@')) return res.status(400).json({ error: 'A valid email address is required.' });
+  if (payload.rcExtension && payload.rcExtension.length > 5) {
+    return res.status(400).json({ error: 'Extension must be 5 characters or fewer.' });
+  }
+
+  if (body.rcId !== undefined && body.rcId !== null && body.rcId !== '') {
+    const n = Number(body.rcId);
+    if (!Number.isInteger(n) || n <= 0) return res.status(400).json({ error: 'RingCX agent ID must be a positive integer.' });
+    payload.rcId = n;
+  }
+
+  for (const key of USER_FLAG_KEY_SET) {
+    if (body[key] === undefined) continue;
+    if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key} must be a boolean.` });
+    payload[key] = body[key];
+  }
+
+  // Role grants escalate privilege, so only a superAdmin may hand them out —
+  // mirroring the guard on PUT /api/users/:id/active.
+  for (const key of CREATE_ROLE_FIELDS) {
+    if (body[key] === undefined || body[key] === false) continue;
+    if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key} must be a boolean.` });
+    if (!req.session.user.superAdmin) {
+      return res.status(403).json({ error: 'Only a super admin can grant supervisor or super admin.' });
+    }
+    payload[key] = true;
+  }
+
+  // New hires start active and are forced through a password set on first login
+  // if they ever sign in without SSO.
+  payload.active = true;
+  payload.passwordResetRequired = true;
+
+  try {
+    // ATP has no unique constraint on email, and a duplicate would make every
+    // email-keyed lookup ambiguous, so the check lives here.
+    const existing = await atp.users.fetchAll({});
+    const clash = (existing || []).find(
+      (u) => String(u.email || '').trim().toLowerCase() === payload.email.toLowerCase()
+    );
+    if (clash) {
+      return res.status(409).json({
+        error: `${userDisplayName(clash)} already exists with that email.`,
+        existingId: clash.id,
+      });
+    }
+
+    await atp.users.create(payload);
+
+    // ATP's create responds with 'ok' rather than the row, so read it back to
+    // return a real id to the modal.
+    const refreshed = await atp.users.fetchAll({});
+    const created = refreshed.find(
+      (u) => String(u.email || '').trim().toLowerCase() === payload.email.toLowerCase()
+    );
+
+    usersLogger.info({
+      createdId: created ? created.id : null,
+      name: `${payload.nameFirst} ${payload.nameLast}`,
+      email: payload.email,
+      rcId: payload.rcId ?? null,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+    }, 'User created');
+
+    websocket.broadcast().catch(() => {});
+    res.status(201).json({ id: created ? created.id : null, user: created || null });
+  } catch (error) {
+    usersLogger.error({ err: error.message, email: payload.email }, 'Failed to create user');
+    res.status(500).json({ error: 'Failed to create user.' });
+  }
+});
+
 router.put('/api/users/:id/reminders', requireSupervisor, async (req, res) => {
   const { updates, error } = parseReminderUpdates(req.body);
   if (error) return res.status(400).json({ error });
@@ -208,6 +360,37 @@ router.put('/api/me/reminders', async (req, res) => {
     res.json({ updated, user: updated });
   } catch {
     res.status(500).json({ error: 'Failed to update reminders' });
+  }
+});
+
+// Self-service queue alert prefs (supervisors only — they're the only ones who
+// get the alerts). Re-read the user so a stale session can't serve stale values.
+router.get('/api/me/queue-alerts', requireSupervisor, async (req, res) => {
+  try {
+    const fresh = await atp.users.fetchOne(req.session.user.id);
+    res.json({
+      enabled: fresh?.queueAlertsEnabled ?? QUEUE_ALERT_DEFAULTS.enabled,
+      queueDepth: Number.isFinite(fresh?.queueDepthAlert) ? fresh.queueDepthAlert : QUEUE_ALERT_DEFAULTS.queueDepth,
+      waitSeconds: Number.isFinite(fresh?.queueWaitAlert) ? fresh.queueWaitAlert : QUEUE_ALERT_DEFAULTS.waitSeconds,
+      sound: fresh?.queueAlertSound ?? QUEUE_ALERT_DEFAULTS.sound,
+      sticky: fresh?.queueAlertSticky ?? QUEUE_ALERT_DEFAULTS.sticky,
+      defaults: QUEUE_ALERT_DEFAULTS,
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to load queue alert preferences' });
+  }
+});
+
+router.put('/api/me/queue-alerts', requireSupervisor, async (req, res) => {
+  const { updates, error } = parseQueueAlertUpdates(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    await atp.users.update(req.session.user.id, updates);
+    // Mirror into session so subsequent reads stay consistent within this session.
+    Object.assign(req.session.user, updates);
+    res.json({ updated: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to update queue alert preferences' });
   }
 });
 

@@ -12,6 +12,7 @@
     "format": "prettier -w ."
   },
   "dependencies": {
+    "@alula-net/alula-js": "^3.62.0",
     "@azure/msal-node": "^5.0.5",
     "@ringcentral/sdk": "^5.0.5",
     "async-mutex": "^0.5.0",
