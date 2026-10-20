@@ -1,9 +1,1011 @@
-const router = require('express').Router();
+const express = require('express');
+const router = express.Router();
 const dashboardController = require('../controllers/dashboard');
+const reportsController = require('../controllers/reports');
+const atp = require('../ATP');
+const ava = require('../AVA');
+const websocket = require('../helpers/websocket');
+const announcementFiles = require('../helpers/announcementFiles');
+const { createLogger } = require('../helpers/logger');
+
+const { invalidateActiveCache } = require('../auth/authMiddleware');
+
+const announcementsLogger = createLogger('announcements');
+const trackedIssuesLogger = createLogger('trackedIssues');
+const usersLogger = createLogger('users');
+const {
+  getVisibilityConfig,
+  getPermissions,
+  getViewScopes,
+  canAccess,
+  FEATURES,
+  FEATURE_TIERS,
+} = require('../helpers/dashboardAccess');
+const { USER_FLAGS, USER_FLAG_KEY_SET } = require('../helpers/userFlags');
+const { getBufferSeconds, setBufferSeconds, DEFAULT_BUFFER_SECONDS } = require('../helpers/breakLateBuffer');
+const { resolveIdentity } = require('../helpers/identityResolver');
+
+const REMINDER_KEYS = ['preferredBreakTimer', 'preferredLunchTimer'];
+function parseReminderUpdates(payload) {
+  // Returns { updates } on success, { error } on failure.
+  // Values are integer SECONDS, non-negative.
+  if (!payload || typeof payload !== 'object') return { error: 'Invalid payload' };
+  const updates = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!REMINDER_KEYS.includes(key)) return { error: `Unknown reminder field: ${key}` };
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) {
+      return { error: `${key} must be a non-negative integer (seconds)` };
+    }
+    updates[key] = n;
+  }
+  if (Object.keys(updates).length === 0) return { error: 'No reminder updates provided' };
+  return { updates };
+}
+
+// Per-supervisor queue alert prefs. Column names are the ATP user attributes;
+// the API speaks the shorter client-facing names.
+const QUEUE_ALERT_DEFAULTS = { enabled: false, queueDepth: 5, waitSeconds: 300, sound: true, sticky: true };
+const QUEUE_ALERT_BOOLS = { enabled: 'queueAlertsEnabled', sound: 'queueAlertSound', sticky: 'queueAlertSticky' };
+function parseQueueAlertUpdates(payload) {
+  // Returns { updates } on success, { error } on failure.
+  if (!payload || typeof payload !== 'object') return { error: 'Invalid payload' };
+  const updates = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (QUEUE_ALERT_BOOLS[key]) {
+      if (typeof value !== 'boolean') return { error: `${key} must be a boolean` };
+      updates[QUEUE_ALERT_BOOLS[key]] = value;
+      continue;
+    }
+    if (key === 'queueDepth' || key === 'waitSeconds') {
+      const n = Number(value);
+      // Floors keep the alert meaningful: a depth of 0 would fire constantly and
+      // a sub-30s wait would fire before the caller has really waited.
+      const [min, max] = key === 'queueDepth' ? [1, 100] : [30, 3600];
+      if (!Number.isFinite(n) || Math.floor(n) !== n || n < min || n > max) {
+        return { error: `${key} must be an integer between ${min} and ${max}` };
+      }
+      updates[key === 'queueDepth' ? 'queueDepthAlert' : 'queueWaitAlert'] = n;
+      continue;
+    }
+    return { error: `Unknown queue alert field: ${key}` };
+  }
+  if (Object.keys(updates).length === 0) return { error: 'No queue alert updates provided' };
+  return { updates };
+}
+
+const requireSupervisor = (req, res, next) => {
+  if (!req.session?.user?.superAdmin && !req.session?.user?.supervisor) return res.status(403).json({ error: 'Forbidden' });
+  next();
+};
+
+const requireReportsAccess = async (req, res, next) => {
+  try {
+    const config = await getVisibilityConfig();
+    if (!canAccess(config.reports, req.session?.user)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  } catch {
+    return res.status(500).json({ error: 'Failed to verify access' });
+  }
+};
 
 router.get('/api', dashboardController.getData);
-router.delete('/api/queue/:id', dashboardController.removeQueueCall);
-router.delete('/api/call/:id', dashboardController.clearAgentCall);
+router.get('/api/stats', dashboardController.getStats);
+router.get('/api/reports', requireReportsAccess, reportsController.getReports);
 
+router.get('/api/me', async (req, res) => {
+  try {
+    const config = await getVisibilityConfig();
+    const permissions = getPermissions(req.session.user, config);
+    const viewScopes = getViewScopes(req.session.user, config);
+    res.json({ ...req.session.user, permissions, viewScopes });
+  } catch {
+    res.json({ ...req.session.user, permissions: {}, viewScopes: {} });
+  }
+});
+
+router.delete('/api/queue/:id', requireSupervisor, dashboardController.removeQueueCall);
+router.delete('/api/call/:id', requireSupervisor, dashboardController.clearAgentCall);
+
+// User feature-flag admin (supervisors + superAdmins)
+router.get('/api/users/flags', requireSupervisor, async (req, res) => {
+  try {
+    const users = await atp.users.fetchAll({});
+    // super_admins can manage flags on supervisors too; regular supervisors
+    // only see non-supervisor agents. Extension prefix filter (82* = real
+    // agent/supervisor accounts) applies to both, so admin/test accounts
+    // stay hidden.
+    const isSuperAdmin = !!(req.session && req.session.user && req.session.user.superAdmin);
+    const list = users
+      .filter((u) => isSuperAdmin || !u.supervisor)
+      .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
+      .map((u) => {
+        const row = {
+          id: u.id,
+          name: `${u.nameFirst || ''} ${u.nameLast || ''}`.trim() || u.email || u.id,
+          email: u.email || '',
+          preferredBreakTimer: Number.isFinite(u.preferredBreakTimer) ? u.preferredBreakTimer : 120,
+          preferredLunchTimer: Number.isFinite(u.preferredLunchTimer) ? u.preferredLunchTimer : 600,
+          // Deliberately unfiltered above: deactivated users must stay in this
+          // list or there would be no way to reactivate them.
+          active: u.active !== false,
+        };
+        for (const { key } of USER_FLAGS) row[key] = !!u[key];
+        return row;
+      });
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ flags: USER_FLAGS, users: list });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user flags' });
+  }
+});
+
+router.put('/api/users/:id/flags', requireSupervisor, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const updates = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (!USER_FLAG_KEY_SET.has(key)) {
+        return res.status(400).json({ error: `Unknown flag: ${key}` });
+      }
+      updates[key] = !!value;
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No valid flag updates provided' });
+    }
+    const updated = await atp.users.update(req.params.id, updates);
+    res.json({ id: req.params.id, updated: updates, user: updated });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update user flags' });
+  }
+});
+
+// Activate / deactivate a user (supervisors + superAdmins). Kept off the
+// USER_FLAGS registry deliberately: this isn't a feature gate, it has side
+// effects (session eviction, live broadcast) and it needs its own audit line.
+router.put('/api/users/:id/active', requireSupervisor, async (req, res) => {
+  const targetId = req.params.id;
+  const active = !!req.body?.active;
+
+  // Locking yourself out of the dashboard you administer is never intentional.
+  if (req.session.user.id === targetId) {
+    return res.status(400).json({ error: 'You cannot deactivate your own account.' });
+  }
+
+  try {
+    const target = await atp.users.fetchOne(targetId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    // Mirrors the roster filter on GET /api/users/flags — a plain supervisor
+    // manages agents, only a superAdmin can touch another supervisor.
+    if (target.supervisor && !req.session.user.superAdmin) {
+      return res.status(403).json({ error: 'Only a super admin can change a supervisor.' });
+    }
+
+    const updated = await atp.users.update(targetId, { active });
+    // Drop the cached active state so the change lands on the target's very next
+    // request rather than waiting out the recheck interval.
+    invalidateActiveCache(targetId);
+
+    usersLogger.info({
+      targetId,
+      targetName: userDisplayName(target),
+      active,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+    }, active ? 'User reactivated' : 'User deactivated');
+
+    // Push to open dashboards so a deactivated agent drops off the grid live.
+    websocket.broadcast().catch(() => {});
+    res.json({ id: targetId, active, user: updated });
+  } catch (error) {
+    usersLogger.error({ err: error.message, targetId, active }, 'Failed to change user active state');
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// --- Onboarding -------------------------------------------------------------
+// Resolve a prospective hire's external system IDs from a name + email. Purely
+// read-only: every source is a lookup, nothing is provisioned anywhere.
+router.post('/api/users/resolve', requireSupervisor, async (req, res) => {
+  const nameFirst = typeof req.body?.nameFirst === 'string' ? req.body.nameFirst.trim() : '';
+  const nameLast = typeof req.body?.nameLast === 'string' ? req.body.nameLast.trim() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+
+  if (!nameFirst || !nameLast) return res.status(400).json({ error: 'First and last name are required.' });
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'A valid email address is required.' });
+
+  try {
+    const result = await resolveIdentity({ nameFirst, nameLast, email });
+    usersLogger.info({
+      email,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+      resolved: Object.fromEntries(Object.entries(result.fields).map(([k, v]) => [k, v.confidence])),
+      errors: Object.keys(result.errors),
+    }, 'Onboarding identity lookup');
+    res.json(result);
+  } catch (error) {
+    usersLogger.error({ err: error.message, email }, 'Onboarding identity lookup failed');
+    res.status(500).json({ error: 'Lookup failed. Try again, or enter the IDs manually.' });
+  }
+});
+
+// Fields a supervisor may set on a new user. Everything absent from this list is
+// left at its ATP default — notably password (set on first sign-in), the queue
+// alert prefs, and the status/login columns the webhooks own. ATP's POST /users
+// writes whatever body it receives straight to the model, so this whitelist is
+// the only thing standing between the modal and an arbitrary column write.
+const CREATE_STRING_FIELDS = ['nameFirst', 'nameLast', 'email', 'rcExtension', 'sfdcId', 'slackId', 'alulaConnectId', 'microsoftId'];
+const CREATE_ROLE_FIELDS = ['supervisor', 'superAdmin'];
+
+router.post('/api/users', requireSupervisor, async (req, res) => {
+  const body = req.body || {};
+  const payload = {};
+
+  for (const key of CREATE_STRING_FIELDS) {
+    const raw = body[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    if (typeof raw !== 'string') return res.status(400).json({ error: `${key} must be a string.` });
+    payload[key] = raw.trim();
+  }
+
+  if (!payload.nameFirst || !payload.nameLast) return res.status(400).json({ error: 'First and last name are required.' });
+  if (!payload.email || !payload.email.includes('@')) return res.status(400).json({ error: 'A valid email address is required.' });
+  if (payload.rcExtension && payload.rcExtension.length > 5) {
+    return res.status(400).json({ error: 'Extension must be 5 characters or fewer.' });
+  }
+
+  if (body.rcId !== undefined && body.rcId !== null && body.rcId !== '') {
+    const n = Number(body.rcId);
+    if (!Number.isInteger(n) || n <= 0) return res.status(400).json({ error: 'RingCX agent ID must be a positive integer.' });
+    payload.rcId = n;
+  }
+
+  for (const key of USER_FLAG_KEY_SET) {
+    if (body[key] === undefined) continue;
+    if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key} must be a boolean.` });
+    payload[key] = body[key];
+  }
+
+  // Role grants escalate privilege, so only a superAdmin may hand them out —
+  // mirroring the guard on PUT /api/users/:id/active.
+  for (const key of CREATE_ROLE_FIELDS) {
+    if (body[key] === undefined || body[key] === false) continue;
+    if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key} must be a boolean.` });
+    if (!req.session.user.superAdmin) {
+      return res.status(403).json({ error: 'Only a super admin can grant supervisor or super admin.' });
+    }
+    payload[key] = true;
+  }
+
+  // New hires start active and are forced through a password set on first login
+  // if they ever sign in without SSO.
+  payload.active = true;
+  payload.passwordResetRequired = true;
+
+  try {
+    // ATP has no unique constraint on email, and a duplicate would make every
+    // email-keyed lookup ambiguous, so the check lives here.
+    const existing = await atp.users.fetchAll({});
+    const clash = (existing || []).find(
+      (u) => String(u.email || '').trim().toLowerCase() === payload.email.toLowerCase()
+    );
+    if (clash) {
+      return res.status(409).json({
+        error: `${userDisplayName(clash)} already exists with that email.`,
+        existingId: clash.id,
+      });
+    }
+
+    await atp.users.create(payload);
+
+    // ATP's create responds with 'ok' rather than the row, so read it back to
+    // return a real id to the modal.
+    const refreshed = await atp.users.fetchAll({});
+    const created = refreshed.find(
+      (u) => String(u.email || '').trim().toLowerCase() === payload.email.toLowerCase()
+    );
+
+    usersLogger.info({
+      createdId: created ? created.id : null,
+      name: `${payload.nameFirst} ${payload.nameLast}`,
+      email: payload.email,
+      rcId: payload.rcId ?? null,
+      byId: req.session.user.id,
+      byName: userDisplayName(req.session.user),
+    }, 'User created');
+
+    websocket.broadcast().catch(() => {});
+    res.status(201).json({ id: created ? created.id : null, user: created || null });
+  } catch (error) {
+    usersLogger.error({ err: error.message, email: payload.email }, 'Failed to create user');
+    res.status(500).json({ error: 'Failed to create user.' });
+  }
+});
+
+router.put('/api/users/:id/reminders', requireSupervisor, async (req, res) => {
+  const { updates, error } = parseReminderUpdates(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    const updated = await atp.users.update(req.params.id, updates);
+    res.json({ id: req.params.id, updated, user: updated });
+  } catch {
+    res.status(500).json({ error: 'Failed to update reminders' });
+  }
+});
+
+// Self-service reminders (any authenticated user — edits their own record)
+router.get('/api/me/reminders', async (req, res) => {
+  try {
+    const fresh = await atp.users.fetchOne(req.session.user.id);
+    res.json({
+      preferredBreakTimer: Number.isFinite(fresh?.preferredBreakTimer) ? fresh.preferredBreakTimer : 120,
+      preferredLunchTimer: Number.isFinite(fresh?.preferredLunchTimer) ? fresh.preferredLunchTimer : 600,
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to load reminders' });
+  }
+});
+
+router.put('/api/me/reminders', async (req, res) => {
+  const { updates, error } = parseReminderUpdates(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    const updated = await atp.users.update(req.session.user.id, updates);
+    // Mirror into session so subsequent reads stay consistent within this session.
+    Object.assign(req.session.user, updates);
+    res.json({ updated, user: updated });
+  } catch {
+    res.status(500).json({ error: 'Failed to update reminders' });
+  }
+});
+
+// Self-service queue alert prefs (supervisors only — they're the only ones who
+// get the alerts). Re-read the user so a stale session can't serve stale values.
+router.get('/api/me/queue-alerts', requireSupervisor, async (req, res) => {
+  try {
+    const fresh = await atp.users.fetchOne(req.session.user.id);
+    res.json({
+      enabled: fresh?.queueAlertsEnabled ?? QUEUE_ALERT_DEFAULTS.enabled,
+      queueDepth: Number.isFinite(fresh?.queueDepthAlert) ? fresh.queueDepthAlert : QUEUE_ALERT_DEFAULTS.queueDepth,
+      waitSeconds: Number.isFinite(fresh?.queueWaitAlert) ? fresh.queueWaitAlert : QUEUE_ALERT_DEFAULTS.waitSeconds,
+      sound: fresh?.queueAlertSound ?? QUEUE_ALERT_DEFAULTS.sound,
+      sticky: fresh?.queueAlertSticky ?? QUEUE_ALERT_DEFAULTS.sticky,
+      defaults: QUEUE_ALERT_DEFAULTS,
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to load queue alert preferences' });
+  }
+});
+
+router.put('/api/me/queue-alerts', requireSupervisor, async (req, res) => {
+  const { updates, error } = parseQueueAlertUpdates(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    await atp.users.update(req.session.user.id, updates);
+    // Mirror into session so subsequent reads stay consistent within this session.
+    Object.assign(req.session.user, updates);
+    res.json({ updated: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to update queue alert preferences' });
+  }
+});
+
+// SuperAdmin: break late-notification buffer (seconds)
+router.get('/api/settings/breakLateBuffer', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const seconds = await getBufferSeconds();
+    res.json({ seconds, defaultSeconds: DEFAULT_BUFFER_SECONDS });
+  } catch {
+    res.status(500).json({ error: 'Failed to load break late buffer' });
+  }
+});
+
+router.put('/api/settings/breakLateBuffer', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const n = Number(req.body?.seconds);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) {
+    return res.status(400).json({ error: 'seconds must be a non-negative integer' });
+  }
+  try {
+    await setBufferSeconds(n);
+    res.json({ seconds: n });
+  } catch {
+    res.status(500).json({ error: 'Failed to save break late buffer' });
+  }
+});
+
+// SuperAdmin-only settings endpoints
+router.get('/api/settings/visibility', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const config = await getVisibilityConfig();
+    const users = await atp.users.fetchAll({});
+    const userList = users
+      .filter((u) => u.active !== false)
+      .map((u) => ({ id: u.id, name: `${u.nameFirst} ${u.nameLast}`.trim() }));
+    res.json({ config, users: userList, featureTiers: FEATURE_TIERS });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch visibility settings' });
+  }
+});
+
+router.put('/api/settings/visibility', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const newConfig = req.body;
+    // Validate structure
+    for (const key of FEATURES) {
+      const tiers = FEATURE_TIERS[key] || [];
+      if (!newConfig[key] || !tiers.includes(newConfig[key].visibility)) {
+        return res.status(400).json({ error: `Invalid visibility for ${key}` });
+      }
+      if (!Array.isArray(newConfig[key].approvedUsers)) {
+        newConfig[key].approvedUsers = [];
+      }
+    }
+    const existing = await atp.settings.fetchOne({ key: 'dashboardVisibility' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: JSON.stringify(newConfig) });
+    } else {
+      await atp.settings.create({ key: 'dashboardVisibility', value: JSON.stringify(newConfig) });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update visibility settings' });
+  }
+});
+
+// SuperAdmin: Slack channels map (name → channel id or #name)
+router.get('/api/settings/channels', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const setting = await atp.settings.fetchOne({ key: 'channels' });
+    const raw = setting?.value;
+    const value = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    res.json({ channels: value });
+  } catch {
+    res.status(500).json({ error: 'Failed to load channels' });
+  }
+});
+
+router.put('/api/settings/channels', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const incoming = req.body?.channels;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return res.status(400).json({ error: 'channels must be an object' });
+  }
+  const cleaned = {};
+  for (const [rawName, rawId] of Object.entries(incoming)) {
+    const name = String(rawName || '').trim();
+    const id = String(rawId ?? '').trim();
+    if (!name || !id) return res.status(400).json({ error: 'Every channel needs a name and an id' });
+    if (Object.prototype.hasOwnProperty.call(cleaned, name)) {
+      return res.status(400).json({ error: `Duplicate channel name: ${name}` });
+    }
+    cleaned[name] = id;
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'channels' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: cleaned });
+    } else {
+      await atp.settings.create({ key: 'channels', value: cleaned });
+    }
+    res.json({ channels: cleaned });
+  } catch {
+    res.status(500).json({ error: 'Failed to save channels' });
+  }
+});
+
+// Tracked-issues ticker loop duration (seconds). Global setting; read by all
+// clients so the marquee speed stays in sync. Only super_admins can change it.
+router.get('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  try {
+    const setting = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    const raw = setting && setting.value;
+    const value = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    const seconds = Number.isFinite(value.seconds) ? value.seconds : 60;
+    res.json({ seconds, defaultSeconds: 60 });
+  } catch {
+    res.status(500).json({ error: 'Failed to load ticker speed setting' });
+  }
+});
+
+router.put('/api/settings/trackedIssuesTickerSpeed', async (req, res) => {
+  if (!req.session?.user?.superAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const n = Number(req.body?.seconds);
+  if (!Number.isFinite(n) || n < 5 || n > 600 || Math.floor(n) !== n) {
+    return res.status(400).json({ error: 'seconds must be an integer between 5 and 600' });
+  }
+  try {
+    const existing = await atp.settings.fetchOne({ key: 'tracked-issues-ticker-speed' });
+    if (existing) {
+      await atp.settings.update(existing.id, { value: JSON.stringify({ seconds: n }) });
+    } else {
+      await atp.settings.create({ key: 'tracked-issues-ticker-speed', value: JSON.stringify({ seconds: n }) });
+    }
+    res.json({ seconds: n });
+  } catch {
+    res.status(500).json({ error: 'Failed to save ticker speed' });
+  }
+});
+
+// --- Announcements ---
+
+function userDisplayName(u) {
+  return `${u.nameFirst || ''} ${u.nameLast || ''}`.trim() || u.email || u.id;
+}
+
+router.get('/api/announcements/all', async (req, res) => {
+  try {
+    const [list, users] = await Promise.all([
+      atp.announcements.fetchAll({}),
+      atp.users.fetchAll({}),
+    ]);
+    const userById = new Map((users || []).map((u) => [u.id, userDisplayName(u)]));
+    const isSup = !!(req.session.user.superAdmin || req.session.user.supervisor);
+    // userById above stays unfiltered so createdByName still resolves for
+    // announcements posted by someone who has since been deactivated.
+    const eligible = isSup
+      ? (users || [])
+          .filter((u) => u.active !== false)
+          .filter((u) => !u.supervisor)
+          .filter((u) => String(u.rcExtension ?? '').startsWith('82'))
+      : null;
+    const myId = req.session.user.id;
+    const enriched = await Promise.all(
+      (list || []).map(async (a) => {
+        let acks = [];
+        try {
+          acks = (await atp.announcements.fetchAcks(a.id)) || [];
+        } catch {}
+        const acknowledgedByMe = acks.some((ack) => ack.userId === myId);
+        const base = {
+          ...a,
+          createdByName: userById.get(a.createdBy) || 'Unknown',
+          acknowledgedByMe,
+          ackCount: acks.length,
+        };
+        if (isSup && eligible) {
+          const ackById = new Map(acks.map((ack) => [ack.userId, ack.ackedAt]));
+          const acknowledged = [];
+          const pending = [];
+          for (const u of eligible) {
+            const row = { userId: u.id, name: userDisplayName(u) };
+            if (ackById.has(u.id)) acknowledged.push({ ...row, ackedAt: ackById.get(u.id) });
+            else pending.push(row);
+          }
+          acknowledged.sort((a, b) => a.name.localeCompare(b.name));
+          pending.sort((a, b) => a.name.localeCompare(b.name));
+          base.acknowledged = acknowledged;
+          base.pending = pending;
+          base.eligibleCount = eligible.length;
+        }
+        return base;
+      })
+    );
+    enriched.sort((a, b) => {
+      if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    res.json({ announcements: enriched });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcements' });
+  }
+});
+
+router.get('/api/announcements', async (req, res) => {
+  try {
+    const list = await atp.announcements.fetchAll({ active: true });
+    const userId = req.session.user.id;
+    const enriched = await Promise.all(
+      (list || []).map(async (a) => {
+        let acknowledgedByMe = false;
+        try {
+          const acks = await atp.announcements.fetchAcks(a.id);
+          acknowledgedByMe = (acks || []).some((ack) => ack.userId === userId);
+        } catch {}
+        return { ...a, acknowledgedByMe };
+      })
+    );
+    enriched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ announcements: enriched });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcements' });
+  }
+});
+
+router.post('/api/announcements', express.json({ limit: '32mb' }), requireSupervisor, async (req, res) => {
+  const title = String(req.body?.title || '').trim();
+  const body = String(req.body?.body || '').trim();
+  const files = Array.isArray(req.body?.files) ? req.body.files : [];
+  const totalFileBytes = files.reduce((n, f) => n + (typeof f.base64 === 'string' ? Math.floor(f.base64.length * 0.75) : 0), 0);
+  announcementsLogger.info({
+    userId: req.session.user.id,
+    userName: userDisplayName(req.session.user),
+    title,
+    bodyLen: body.length,
+    fileCount: files.length,
+    totalFileBytes,
+  }, 'Announcement POST received');
+  if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
+  if (title.length > 200) return res.status(400).json({ error: 'title must be 200 chars or fewer' });
+  if (totalFileBytes > announcementFiles.MAX_TOTAL_BYTES) {
+    const mb = (totalFileBytes / (1024 * 1024)).toFixed(1);
+    const max = Math.floor(announcementFiles.MAX_TOTAL_BYTES / (1024 * 1024));
+    return res.status(413).json({ error: `Attachments total ${mb}MB — max ${max}MB combined.` });
+  }
+  try {
+    const created = await atp.announcements.create({
+      title,
+      body,
+      createdBy: req.session.user.id,
+    });
+    // Keep our own copy of the attachments so they can be viewed on the
+    // dashboard. A Slack permalink can't do that job — it needs a Slack session
+    // to open and a bearer token to inline, so it only ever worked as a bounce
+    // into Slack. Stored before the Slack post so an attachment survives on the
+    // dashboard even when Slack delivery fails.
+    let storedFiles = [];
+    try {
+      storedFiles = await announcementFiles.save(created.id, files);
+    } catch (err) {
+      announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to store announcement attachments');
+    }
+    // Post to cscChat via AVA (with optional files) and wait for the outcome,
+    // so the poster is told whether Slack actually received it. The row is
+    // already saved either way — a Slack failure downgrades the response to a
+    // warning rather than failing the request.
+    let slackPosted = true;
+    let slackError = null;
+    try {
+      const r = await ava.announcements.post(title, body, userDisplayName(req.session.user), files);
+      // Keep the permalink next to our own copy for reference. Slack returns
+      // uploads in the order they were sent.
+      const permalinks = Array.isArray(r && r.permalinks) ? r.permalinks : [];
+      permalinks.forEach((link, i) => {
+        if (storedFiles[i]) storedFiles[i].slackPermalink = link;
+      });
+    } catch (err) {
+      slackPosted = false;
+      slackError = err.message;
+      announcementsLogger.error({ err: err.message, id: created.id, fileCount: files.length, totalFileBytes }, 'AVA announcement post failed');
+    }
+    if (storedFiles.length) {
+      await atp.announcements
+        .update(created.id, { fileUrls: storedFiles })
+        .catch((err) => announcementsLogger.error({ err: err.message, id: created.id }, 'Failed to persist announcement fileUrls'));
+    }
+    // Push to all open dashboards.
+    websocket.broadcast().catch(() => {});
+    res.json({ ...created, fileUrls: storedFiles, slackPosted, slackError });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create announcement' });
+  }
+});
+
+// Serves an announcement attachment from disk. The whole dashboard router
+// sits behind requireAuth, so these are never publicly reachable. The stored
+// filename comes from the row's own metadata rather than the URL, so :idx can't
+// be walked outside the announcement's directory.
+router.get('/api/announcements/:id/files/:idx', async (req, res) => {
+  const { id, idx } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(404).json({ error: 'Attachment not found' });
+  try {
+    const announcement = await atp.announcements.fetchOne(id);
+    if (!announcement) return res.status(404).json({ error: 'Attachment not found' });
+    const file = announcementFiles.resolve(id, idx, announcement.fileUrls);
+    if (!file) return res.status(404).json({ error: 'Attachment not found' });
+    // Images and PDFs preview in the browser; anything else downloads under its
+    // original name.
+    const inline = /^image\//.test(file.mimeType) || file.mimeType === 'application/pdf';
+    res.type(file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`
+    );
+    res.sendFile(file.path, (err) => {
+      if (!err) return;
+      announcementsLogger.error({ err: err.message, id, idx }, 'Failed to send announcement attachment');
+      if (!res.headersSent) res.status(404).json({ error: 'Attachment not found' });
+    });
+  } catch (error) {
+    announcementsLogger.error({ err: error.message, id, idx }, 'Error resolving announcement attachment');
+    res.status(500).json({ error: 'Failed to fetch attachment' });
+  }
+});
+
+// Permanent delete, as opposed to the soft delete below that only flips
+// active=false. Acknowledgement rows cascade in the database; the attachment
+// files on disk are ours to clean up.
+router.delete('/api/announcements/:id/permanent', requireSupervisor, async (req, res) => {
+  const { id } = req.params;
+  if (!announcementFiles.isValidId(id)) return res.status(400).json({ error: 'Invalid announcement id' });
+  try {
+    await atp.announcements.destroy(id);
+    await announcementFiles.remove(id);
+    announcementsLogger.info({
+      id,
+      userId: req.session.user.id,
+      userName: userDisplayName(req.session.user),
+    }, 'Announcement permanently deleted');
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.status === 404) {
+      // Already gone upstream — drop any files we're still holding so a stale
+      // row can't strand its attachments on disk.
+      await announcementFiles.remove(id);
+      return res.status(404).json({ error: 'Announcement not found' });
+    }
+    announcementsLogger.error({ err: error.message, id }, 'Failed to permanently delete announcement');
+    res.status(500).json({ error: 'Failed to delete announcement' });
+  }
+});
+
+router.delete('/api/announcements/:id', requireSupervisor, async (req, res) => {
+  try {
+    await atp.announcements.update(req.params.id, { active: false });
+    websocket.broadcast().catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to clear announcement' });
+  }
+});
+
+router.post('/api/announcements/:id/ack', async (req, res) => {
+  try {
+    await atp.announcements.acknowledge(req.params.id, req.session.user.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to acknowledge announcement' });
+  }
+});
+
+router.get('/api/announcements/:id/acks', requireSupervisor, async (req, res) => {
+  try {
+    const [acks, users] = await Promise.all([
+      atp.announcements.fetchAcks(req.params.id),
+      atp.users.fetchAll({}),
+    ]);
+    // Deactivated users drop out of the roster — otherwise a departed tech sits
+    // in Pending forever waiting to acknowledge something.
+    const eligible = (users || [])
+      .filter((u) => u.active !== false)
+      .filter((u) => !u.supervisor)
+      .filter((u) => String(u.rcExtension ?? '').startsWith('82'));
+    const ackById = new Map((acks || []).map((a) => [a.userId, a.ackedAt]));
+    const acknowledged = [];
+    const pending = [];
+    for (const u of eligible) {
+      const row = { userId: u.id, name: userDisplayName(u) };
+      if (ackById.has(u.id)) {
+        acknowledged.push({ ...row, ackedAt: ackById.get(u.id) });
+      } else {
+        pending.push(row);
+      }
+    }
+    acknowledged.sort((a, b) => a.name.localeCompare(b.name));
+    pending.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ acknowledged, pending });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcement acks' });
+  }
+});
+
+
+// -------- Tracked issues --------
+// Fields accepted in create/update (mirrors ATP whitelist minus id/timestamps/createdBy).
+const TRACKED_ISSUE_FIELDS = [
+  'summary',
+  'incidentDate',
+  'severity',
+  'status',
+  'description',
+  'dealerInfo',
+  'whatToLookFor',
+  'state',
+];
+const TRACKED_ISSUE_STATES = new Set(['open', 'fix_incoming', 'resolved']);
+
+function pickTrackedIssueFields(body) {
+  const out = {};
+  for (const k of TRACKED_ISSUE_FIELDS) {
+    if (k in body) out[k] = body[k];
+  }
+  return out;
+}
+
+// Active only. Anyone signed in can read; the ticker is gated at the UI layer
+// by the user's tracked_issues_ticker flag.
+router.get('/api/tracked-issues', async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({ active: true });
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+// All (active + resolved) — supervisors only, for the management page.
+// The management page is available to any user with the trackedIssuesTicker
+// flag (matches the ticker's per-user gate); supervisors and super_admins
+// keep access unconditionally.
+router.get('/api/tracked-issues/all', (req, res, next) => {
+  const u = req.session && req.session.user;
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  if (u.trackedIssuesTicker || u.supervisor || u.superAdmin) return next();
+  return res.status(403).json({ error: 'Forbidden' });
+}, async (req, res) => {
+  try {
+    const list = await atp.trackedIssues.fetchAll({});
+    res.json({ trackedIssues: list || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issues' });
+  }
+});
+
+router.get('/api/tracked-issues/:id', async (req, res) => {
+  try {
+    const issue = await atp.trackedIssues.fetchOne(req.params.id);
+    if (!issue) return res.status(404).json({ error: 'Tracked issue not found' });
+    res.json(issue);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch tracked issue' });
+  }
+});
+
+router.post('/api/tracked-issues', requireSupervisor, async (req, res) => {
+  const fields = pickTrackedIssueFields(req.body || {});
+  const summary = String(fields.summary || '').trim();
+  if (!summary) return res.status(400).json({ error: 'summary is required' });
+  if (summary.length > 200) return res.status(400).json({ error: 'summary must be 200 chars or fewer' });
+  fields.summary = summary;
+  if (fields.state && !TRACKED_ISSUE_STATES.has(fields.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  if (fields.state) fields.active = fields.state !== 'resolved';
+  try {
+    const created = await atp.trackedIssues.create({
+      ...fields,
+      createdBy: req.session.user.id,
+    });
+    // Async: append to the Slack canvas AND persist the returned sectionId
+    // so Delete can later remove that specific block. Failures are logged
+    // but never block the caller — the DB row is already created.
+    ava.trackedIssues
+      .post({
+        ...fields,
+        createdByName: userDisplayName(req.session.user),
+        issueId: created.id,
+      })
+      .then((r) => {
+        const mapping = r && r.mapping && typeof r.mapping === 'object' ? r.mapping : null;
+        const hasSomething = mapping && ((Array.isArray(mapping.all) && mapping.all.length) || (mapping.fields && Object.keys(mapping.fields).length));
+        if (hasSomething) {
+          return atp.trackedIssues
+            .update(created.id, { canvasSectionId: mapping })
+            .catch((err) => trackedIssuesLogger.error({ err: err.message, id: created.id }, 'Failed to persist canvasSectionId'));
+        }
+      })
+      .catch((err) => trackedIssuesLogger.error({ err: err.message }, 'AVA tracked-issue post failed'));
+    websocket.broadcast().catch(() => {});
+    res.json(created);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create tracked issue' });
+  }
+});
+
+// Fields that map to canvas sections. Diffing the incoming patch against
+// the current row on these keys tells us which section updates to send to
+// AVA. `active` is a DB-only lifecycle flag and stays out of the canvas.
+const CANVAS_MIRRORED_FIELDS = ['summary','incidentDate','severity','status','description','dealerInfo','whatToLookFor'];
+
+router.patch('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  const patch = pickTrackedIssueFields(req.body || {});
+  if ('active' in (req.body || {})) patch.active = !!req.body.active;
+  if (patch.state && !TRACKED_ISSUE_STATES.has(patch.state)) {
+    return res.status(400).json({ error: 'invalid state' });
+  }
+  // State is the source of truth; keep active in sync so the ticker filter
+  // (which queries active=true) stays correct.
+  if (patch.state) patch.active = patch.state !== 'resolved';
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+  try {
+    const before = await atp.trackedIssues.fetchOne(req.params.id);
+    const updated = await atp.trackedIssues.update(req.params.id, patch);
+    websocket.broadcast().catch(() => {});
+
+    // Push changed canvas-mirrored fields to Slack in place — but only if
+    // this row has a mapping (row was created via the feature OR backfilled).
+    const mapping = before && before.canvasSectionId;
+    const hasMapping = mapping && typeof mapping === 'object' && !Array.isArray(mapping)
+      && mapping.fields && Object.keys(mapping.fields).length;
+    if (hasMapping) {
+      const canvasUpdates = {};
+      for (const key of CANVAS_MIRRORED_FIELDS) {
+        if (!(key in patch)) continue;
+        const prev = before[key] == null ? null : before[key];
+        const next = patch[key] == null ? null : patch[key];
+        if (String(prev) === String(next)) continue;
+        canvasUpdates[key] = next;
+      }
+      if (Object.keys(canvasUpdates).length) {
+        ava.trackedIssues
+          .patch(mapping, canvasUpdates)
+          .then((r) => {
+            trackedIssuesLogger.info({ id: req.params.id, ok: r && r.ok, failures: (r && r.failures) || null, hasMapping: !!(r && r.mapping) }, 'AVA canvas patch responded');
+            if (!r || !r.mapping) return;
+            const oldStr = JSON.stringify(mapping || null);
+            const newStr = JSON.stringify(r.mapping);
+            const changed = oldStr !== newStr;
+            trackedIssuesLogger.info({ id: req.params.id, changed, oldLen: oldStr.length, newLen: newStr.length }, 'Mapping change check');
+            if (!changed) return;
+            return atp.trackedIssues
+              .update(req.params.id, { canvasSectionId: r.mapping })
+              .then(() => trackedIssuesLogger.info({ id: req.params.id }, 'Persisted updated canvas mapping'))
+              .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'Failed to persist updated canvas mapping'));
+          })
+          .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA canvas patch failed'));
+      }
+    }
+
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update tracked issue' });
+  }
+});
+
+// Batch reorder — supervisor-only. Takes an ordered array of IDs and
+// assigns sort_order = index * 100 + 100 in that order. The frontend groups
+// this call per (state) so drag-and-drop only affects rows within the same
+// state bucket.
+router.post('/api/tracked-issues/reorder', requireSupervisor, async (req, res) => {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : null;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      await atp.trackedIssues.update(ids[i], { sortOrder: (i + 1) * 100 });
+    }
+    websocket.broadcast().catch(() => {});
+    res.json({ ok: true });
+  } catch (error) {
+    trackedIssuesLogger.error({ err: error.message }, 'Reorder failed');
+    res.status(500).json({ error: 'Failed to reorder tracked issues' });
+  }
+});
+
+// Hard delete — supervisor-only. Close (soft-hide) is available via PATCH
+// { active: false }; this endpoint fully removes the row from ATP and, if
+// we recorded a canvas section id at create time, removes that block from
+// the Slack canvas too (fire-and-forget — canvas failure never blocks DB
+// delete).
+router.delete('/api/tracked-issues/:id', requireSupervisor, async (req, res) => {
+  try {
+    const row = await atp.trackedIssues.fetchOne(req.params.id);
+    // destroySections() accepts either the new {all, fields} object or the
+    // legacy flat array. Only call it if something is set.
+    const csid = row && row.canvasSectionId;
+    const hasSections = csid && (
+      (Array.isArray(csid) && csid.length) ||
+      (typeof csid === 'object' && ((Array.isArray(csid.all) && csid.all.length) || (csid.fields && Object.keys(csid.fields).length)))
+    );
+    if (hasSections) {
+      ava.trackedIssues
+        .destroySections(csid)
+        .catch((err) => trackedIssuesLogger.error({ err: err.message, id: req.params.id }, 'AVA tracked-issue sections delete failed'));
+    }
+    await atp.trackedIssues.destroy(req.params.id);
+    websocket.broadcast().catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete tracked issue' });
+  }
+});
 
 module.exports = router;

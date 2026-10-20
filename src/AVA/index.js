@@ -3,4 +3,7 @@ module.exports = {
   status: require('./statuses'),
   queue: require('./queue'),
   outbound: require('./outbound'),
+  announcements: require('./announcements'),
+  trackedIssues: require('./trackedIssues'),
+  lookup: require('./lookup'),
 };

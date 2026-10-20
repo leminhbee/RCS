@@ -10,27 +10,62 @@ const xmlparser = require('express-xml-bodyparser');
 const http = require('http');
 const { recoverWrapUps } = require('./helpers/wrapup_timers');
 const { recoverCallbackTimers } = require('./helpers/callback_timers');
+const { recoverBreakTimers } = require('./helpers/break_timers');
 const websocket = require('./helpers/websocket');
 
 // --- Configuration ---
 const app = express();
+app.set('trust proxy', 1); // Trust reverse proxy (nginx) for secure cookies
 const PORT = process.env.PORT || 3005;
 const mutex = new Mutex();
 
 // --- Body parsers ---
 // JSON
-app.use(express.json());
+app.use(express.json({ limit: '32mb' }));
 // text/json (some webhooks may send JSON but with text/json header)
 app.use(express.text({ type: 'text/json' }));
+// URL-encoded (HTML form submissions)
+app.use(express.urlencoded({ extended: false }));
 // XML (parse into JS object)
 app.use(xmlparser({ explicitArray: false, type: ['application/xml', 'text/xml'] }));
+
+// -- Session --
+const sessionMiddleware = require('./auth/session');
+app.use(sessionMiddleware);
+
+// -- Auth routes (login/callback/logout - no auth required) --
+app.use('/auth', require('./routes/auth'));
 
 // -- Dashboard (before mutex - read-only, bypasses webhook processing) --
 const path = require('path');
 const dashboardRouter = require('./routes/dashboard');
-const dashboardPath = `/dashboard/${process.env.DASHBOARD_KEY}`;
-app.use(dashboardPath, express.static(path.join(__dirname, '../public')));
-app.use(dashboardPath, dashboardRouter);
+const requireAuth = require('./auth/authMiddleware');
+
+// EJS view engine for shared layout/partials across dashboard pages
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, '../views'));
+
+// Render templated pages (must come before the static handler so they win over any
+// leftover .html files in public/)
+app.get(['/dashboard', '/dashboard/', '/dashboard/index.html'], requireAuth, (req, res) => res.render('index'));
+app.get('/dashboard/reports.html', requireAuth, (req, res) => res.render('reports'));
+app.get('/dashboard/announcements.html', requireAuth, (req, res) => res.render('announcements'));
+app.get('/dashboard/tracked-issues.html', requireAuth, (req, res) => res.render('tracked-issues'));
+
+// Static assets (css, js, images, etc.)
+app.use('/dashboard', requireAuth, express.static(path.join(__dirname, '../public')));
+app.use('/dashboard', requireAuth, dashboardRouter);
+app.get('/', (req, res) => res.redirect('/dashboard'));
+
+// -- CORS preflight for RC browser-based webhook testing --
+app.options('/calls/transfer', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, dashboard_key',
+  });
+  res.sendStatus(204);
+});
 
 // -- Message ID Middleware --
 app.use((req, res, next) => {
@@ -188,7 +223,7 @@ app.use((req, res, next) => {
 
 // --- Start Server ---
 const server = http.createServer(app);
-websocket.init(server, process.env.DASHBOARD_KEY);
+websocket.init(server, sessionMiddleware);
 
 server.listen(PORT, async () => {
   logger.info(
@@ -217,6 +252,16 @@ server.listen(PORT, async () => {
   } catch (error) {
     logger.error({
       ...createAppLog({ operation: 'callback_recovery' }),
+      ...formatError(error),
+    });
+  }
+
+  // Recover any open break records — restart "ending soon" + "late" timers
+  try {
+    await recoverBreakTimers(logger);
+  } catch (error) {
+    logger.error({
+      ...createAppLog({ operation: 'break_recovery' }),
       ...formatError(error),
     });
   }

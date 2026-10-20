@@ -16,6 +16,7 @@ lerna-debug.log*
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Sessions - express-session files hold live cookies and user records
+# Sessions
 sessions/
 
 # Runtime data
@@ -117,3 +118,5 @@ dist
 
 # Call data exports - never commit customer interaction data
 *.csv
+# Announcement attachments stored on disk
+UPLOADS/

@@ -1,0 +1,35 @@
+<div class="modal fade" id="user-flags-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">User Permissions</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <ul class="nav nav-tabs user-flags-tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="user-flags-tab-permissions" data-bs-toggle="tab" data-bs-target="#user-flags-pane-permissions" type="button" role="tab">Permissions</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="user-flags-tab-reminders" data-bs-toggle="tab" data-bs-target="#user-flags-pane-reminders" type="button" role="tab">Reminders</button>
+          </li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="user-flags-pane-permissions" role="tabpanel">
+            <div id="user-flags-modal-body">Loading...</div>
+          </div>
+          <div class="tab-pane fade" id="user-flags-pane-reminders" role="tabpanel">
+            <div id="user-flags-reminders-body">Loading...</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center">
+        <span id="user-flags-feedback" class="settings-feedback"></span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="user-flags-reset-btn" disabled>Discard</button>
+          <button type="button" class="btn btn-primary btn-sm" id="user-flags-save-btn" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

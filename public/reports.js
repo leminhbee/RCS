@@ -1,0 +1,1250 @@
+let reportData = null;
+let agentSortKey = 'callsHandled';
+let agentSortDir = 'desc';
+let volumeChart = null;
+let agentCallsChart = null;
+let agentTimeChart = null;
+let agentLongChart = null;
+
+// -- Helpers --
+function formatSeconds(sec) {
+  if (sec == null || sec === 0) return '--';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatMinutes(sec) {
+  if (sec == null || sec === 0) return '--';
+  return `${Math.round(sec / 60).toLocaleString()} min`;
+}
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Local calendar date, not toISOString() — UTC shifts the day boundary, which
+// would make "Today" resolve to the wrong date depending on the hour.
+function toLocalISODate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// -- Date presets --
+function getPresetRange(preset) {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun
+  const toISO = toLocalISODate;
+
+  if (preset === 'today') {
+    return { startDate: toISO(today), endDate: toISO(today) };
+  }
+  if (preset === 'yesterday') {
+    const day = new Date(today);
+    day.setDate(today.getDate() - 1);
+    return { startDate: toISO(day), endDate: toISO(day) };
+  }
+  if (preset === 'thisWeek') {
+    const start = new Date(today);
+    start.setDate(today.getDate() - ((dayOfWeek + 6) % 7)); // Monday
+    return { startDate: toISO(start), endDate: toISO(today) };
+  }
+  if (preset === 'lastWeek') {
+    const end = new Date(today);
+    end.setDate(today.getDate() - ((dayOfWeek + 6) % 7) - 1); // Last Sunday
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
+    return { startDate: toISO(start), endDate: toISO(end) };
+  }
+  if (preset === 'thisMonth') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { startDate: toISO(start), endDate: toISO(today) };
+  }
+  if (preset === 'lastMonth') {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { startDate: toISO(start), endDate: toISO(end) };
+  }
+  return null;
+}
+
+// -- API --
+async function fetchReports(startDate, endDate, userId) {
+  const basePath = location.pathname.replace(/\/[^/]*$/, '');
+  let url = `${basePath}/api/reports?startDate=${startDate}&endDate=${endDate}`;
+  if (userId) url += `&userId=${encodeURIComponent(userId)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to fetch reports');
+  }
+  return res.json();
+}
+
+// -- Render: Call Volumes --
+function renderCallVolumes(data) {
+  const { daily, totals } = data;
+
+  const cards = [
+    { value: totals.total, label: 'Total Calls', cls: '' },
+    { value: totals.inbound, label: 'Inbound', cls: 'stat-answered' },
+    { value: totals.outbound, label: 'Outbound', cls: 'stat-outbound' },
+    { value: totals.callbacks, label: 'Callbacks', cls: 'stat-callback' },
+    { value: totals.abandoned, label: 'Missed / Abandoned', cls: 'stat-abandoned' },
+    { value: formatMinutes(totals.totalTalkTime || 0), label: 'Total Talk Time', cls: '' },
+  ];
+
+  document.getElementById('volume-totals').innerHTML = cards.map((c) => `
+    <div class="col"><div class="card stat-card ${c.cls} p-2">
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-label">${c.label}</div>
+    </div></div>
+  `).join('');
+
+  if (daily.length === 0) {
+    document.getElementById('volume-daily-table').innerHTML = '<div class="empty">No call data for this period</div>';
+    return;
+  }
+
+  let html = `<table class="table table-striped table-hover table-sm mb-0">
+    <thead><tr>
+      <th>Date</th><th class="text-center">Total</th><th class="text-center">Inbound</th>
+      <th class="text-center">Outbound</th><th class="text-center">Callbacks</th><th class="text-center">Abandoned</th>
+    </tr></thead><tbody>`;
+  for (const day of daily) {
+    html += `<tr>
+      <td>${formatDate(day.date)}</td>
+      <td class="text-center">${day.total}</td>
+      <td class="text-center">${day.inbound}</td>
+      <td class="text-center">${day.outbound}</td>
+      <td class="text-center">${day.callbacks}</td>
+      <td class="text-center">${day.abandoned}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('volume-daily-table').innerHTML = html;
+}
+
+function isWeekday(dateStr) {
+  const day = new Date(dateStr + 'T00:00:00').getDay();
+  return day !== 0 && day !== 6;
+}
+
+function freshCanvas(id) {
+  const old = document.getElementById(id);
+  if (!old) return null;
+  const canvas = document.createElement('canvas');
+  canvas.id = id;
+  old.parentNode.replaceChild(canvas, old);
+  return canvas;
+}
+
+function renderVolumeChart(daily) {
+  if (volumeChart) { volumeChart.destroy(); volumeChart = null; }
+  const ctx = freshCanvas('volume-chart');
+  if (!ctx) return;
+
+  const weekdays = daily.filter((d) => isWeekday(d.date));
+  const chartType = document.getElementById('volume-chart-type').value;
+  const isDark = document.body.classList.contains('dark');
+  const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+  const tickColor = isDark ? '#8899aa' : '#6b7280';
+  const isLine = chartType === 'line';
+
+  const labels = weekdays.map((d) => formatDate(d.date));
+
+  const colors = {
+    inbound: 'rgba(22,101,52,0.7)',
+    outbound: 'rgba(3,105,161,0.7)',
+    callbacks: 'rgba(146,64,14,0.7)',
+    abandoned: 'rgba(153,27,27,0.7)',
+  };
+
+  const makeDataset = (label, key, color) => ({
+    label,
+    data: weekdays.map((d) => d[key]),
+    backgroundColor: color,
+    borderColor: isLine ? color : undefined,
+    borderWidth: isLine ? 2 : undefined,
+    borderRadius: isLine ? undefined : 3,
+    fill: isLine,
+    tension: isLine ? 0.3 : undefined,
+    pointRadius: isLine ? 3 : undefined,
+  });
+
+  volumeChart = new Chart(ctx, {
+    type: chartType,
+    data: {
+      labels,
+      datasets: [
+        makeDataset('Inbound', 'inbound', colors.inbound),
+        makeDataset('Outbound', 'outbound', colors.outbound),
+        makeDataset('Callbacks', 'callbacks', colors.callbacks),
+        makeDataset('Abandoned', 'abandoned', colors.abandoned),
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: tickColor } } },
+      scales: {
+        x: { stacked: !isLine, grid: { display: false }, ticks: { color: tickColor } },
+        y: { stacked: !isLine, beginAtZero: true, grid: { color: gridColor }, ticks: { color: tickColor } },
+      },
+    },
+  });
+}
+
+// -- Render: Duration / Responsiveness --
+function renderDuration(data, teamData) {
+  const isFiltered = !!document.getElementById('team-member-select').value;
+  const t = teamData || {};
+  const cards = [
+    { value: formatSeconds(data.avgCallDuration), team: formatSeconds(t.avgCallDuration), label: 'Avg Call Length', cls: '' },
+    { value: formatSeconds(data.longestCallDuration), team: formatSeconds(t.longestCallDuration), label: 'Longest Call', cls: '' },
+    { value: data.longCalls || 0, team: (t.longCalls || 0).toFixed(1), label: '30 Min+ Calls', cls: '' },
+    { value: formatSeconds(data.avgQueueTime), team: formatSeconds(t.avgQueueTime), label: 'Avg Speed of Answer', cls: '' },
+    { value: formatSeconds(data.longestQueueTime), team: formatSeconds(t.longestQueueTime), label: 'Avg Queue Time', cls: '' },
+  ];
+
+  document.getElementById('duration-stats').innerHTML = cards.map((c) => `
+    <div class="col"><div class="card stat-card ${c.cls} p-2">
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-label">${c.label}</div>
+      ${isFiltered ? `<div class="stat-team-avg">team avg: ${c.team}</div>` : ''}
+    </div></div>
+  `).join('');
+}
+
+// -- Render: Flagged Records --
+function renderFlaggedCalls(flagged) {
+  const card = document.getElementById('flagged-calls-card');
+  const container = document.getElementById('flagged-calls-table');
+  const countEl = document.getElementById('flagged-calls-count');
+  if (!flagged || flagged.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  countEl.textContent = flagged.length;
+
+  let html = `<table class="table table-striped table-hover table-sm mb-0">
+    <thead><tr>
+      <th>Agent</th><th>Started</th><th>Duration</th><th>Caller</th><th>Call ID</th>
+    </tr></thead><tbody>`;
+  for (const c of flagged) {
+    const started = c.startTime ? new Date(c.startTime).toLocaleString() : '--';
+    html += `<tr>
+      <td>${c.agentName}</td>
+      <td>${started}</td>
+      <td>${formatSeconds(c.duration)}</td>
+      <td>${c.callerNumber || '--'}</td>
+      <td><code class="small">${c.id || '--'}</code></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+// -- Render: Agent Activity --
+const AGENT_COLUMNS = {
+  agentName:       { label: 'Agent',            sortVal: (a) => a.agentName },
+  callsHandled:    { label: 'Calls Handled',    sortVal: (a) => a.callsHandled },
+  totalTalkTime:   { label: 'Total Talk Time',  sortVal: (a) => a.totalTalkTime },
+  avgCallDuration: { label: 'Avg Call Length',   sortVal: (a) => a.avgCallDuration },
+  longCalls:       { label: '30 Min+ Calls',    sortVal: (a) => a.longCalls || 0 },
+};
+
+function renderAgentActivity(agents) {
+  const container = document.getElementById('agent-activity-table');
+  if (!agents || agents.length === 0) {
+    container.innerHTML = '<div class="empty">No agent activity for this period</div>';
+    return;
+  }
+
+  let sorted = [...agents];
+  if (agentSortKey && AGENT_COLUMNS[agentSortKey]) {
+    const sv = AGENT_COLUMNS[agentSortKey].sortVal;
+    sorted.sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return agentSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return agentSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const colKeys = Object.keys(AGENT_COLUMNS);
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of colKeys) {
+    const active = agentSortKey === key;
+    const indicator = active ? (agentSortDir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-sort-key="${key}">${AGENT_COLUMNS[key].label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const agent of sorted) {
+    html += `<tr>
+      <td>${agent.agentName}</td>
+      <td class="text-center">${agent.callsHandled}</td>
+      <td class="text-center">${formatMinutes(agent.totalTalkTime)}</td>
+      <td class="text-center">${formatSeconds(agent.avgCallDuration)}</td>
+      <td class="text-center">${agent.longCalls || 0}</td>
+    </tr>`;
+  }
+  const totalCalls = sorted.reduce((s, a) => s + (a.callsHandled || 0), 0);
+  const totalTalk = sorted.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+  const totalLong = sorted.reduce((s, a) => s + (a.longCalls || 0), 0);
+  const teamAvg = totalCalls > 0 ? Math.round(totalTalk / totalCalls) : 0;
+  html += `</tbody><tfoot><tr class="fw-bold">
+    <td>Team Totals</td>
+    <td class="text-center">${totalCalls}</td>
+    <td class="text-center">${formatMinutes(totalTalk)}</td>
+    <td class="text-center">${formatSeconds(teamAvg)}</td>
+    <td class="text-center">${totalLong}</td>
+  </tr></tfoot></table>`;
+  container.innerHTML = html;
+
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-sort-key]');
+    if (!th) return;
+    const key = th.dataset.sortKey;
+    if (agentSortKey === key) {
+      if (agentSortDir === 'asc') {
+        agentSortDir = 'desc';
+      } else {
+        agentSortKey = null;
+        agentSortDir = 'asc';
+      }
+    } else {
+      agentSortKey = key;
+      agentSortDir = 'asc';
+    }
+    renderAgentActivity(reportData.agentActivity);
+  });
+}
+
+const AGENT_PALETTE = [
+  'rgba(0,120,212,0.75)',   // blue
+  'rgba(22,163,74,0.75)',   // green
+  'rgba(147,51,234,0.75)',  // purple
+  'rgba(234,88,12,0.75)',   // orange
+  'rgba(6,182,212,0.75)',   // cyan
+  'rgba(168,85,247,0.75)',  // violet
+  'rgba(14,165,233,0.75)',  // sky
+  'rgba(245,158,11,0.75)',  // amber
+  'rgba(16,185,129,0.75)',  // emerald
+  'rgba(99,102,241,0.75)',  // indigo
+];
+
+function agentColor(index) {
+  return AGENT_PALETTE[index % AGENT_PALETTE.length];
+}
+
+function renderAgentChart() {
+  if (agentCallsChart) { agentCallsChart.destroy(); agentCallsChart = null; }
+  if (agentTimeChart) { agentTimeChart.destroy(); agentTimeChart = null; }
+  if (agentLongChart) { agentLongChart.destroy(); agentLongChart = null; }
+  const callsCtx = freshCanvas('agent-calls-chart');
+  const timeCtx = freshCanvas('agent-time-chart');
+  const longCtx = freshCanvas('agent-long-chart');
+  if (!callsCtx || !timeCtx || !longCtx) return;
+
+  const agents = reportData?.agentActivity;
+  const agentDailyData = reportData?.agentDaily;
+  const allDates = reportData?.allDates;
+  if (!agents || agents.length === 0) return;
+
+  const chartType = document.getElementById('agent-chart-type').value;
+  const isDark = document.body.classList.contains('dark');
+  const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+  const tickColor = isDark ? '#8899aa' : '#6b7280';
+  const isLine = chartType === 'line';
+  const isDoughnut = chartType === 'doughnut';
+
+  const sorted = [...agents].sort((a, b) => b.callsHandled - a.callsHandled);
+  const count = sorted.length;
+
+  if (isDoughnut) {
+    const labels = sorted.map((a) => a.agentName);
+    const colors = sorted.map((_, i) => agentColor(i));
+    const doughnutOpts = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { color: tickColor, font: { size: 11 } } } },
+    };
+    agentCallsChart = new Chart(callsCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ label: 'Calls Handled', data: sorted.map((a) => a.callsHandled), backgroundColor: colors }] },
+      options: { ...doughnutOpts, plugins: { ...doughnutOpts.plugins, title: { display: true, text: 'Calls Handled', color: tickColor } } },
+    });
+    agentTimeChart = new Chart(timeCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ label: 'Talk Time (min)', data: sorted.map((a) => Math.round(a.totalTalkTime / 60)), backgroundColor: colors }] },
+      options: { ...doughnutOpts, plugins: { ...doughnutOpts.plugins, title: { display: true, text: 'Talk Time (min)', color: tickColor } } },
+    });
+    agentLongChart = new Chart(longCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ label: '30 Min+ Calls', data: sorted.map((a) => a.longCalls || 0), backgroundColor: colors }] },
+      options: { ...doughnutOpts, plugins: { ...doughnutOpts.plugins, title: { display: true, text: '30 Min+ Calls', color: tickColor } } },
+    });
+    return;
+  }
+
+  const avgLineStyle = { borderColor: 'rgba(250,204,21,1)', borderWidth: 3, borderDash: [8, 4], pointRadius: 0, fill: false, order: 0 };
+
+  if (isLine && agentDailyData && allDates && allDates.length > 1) {
+    // Filter out weekends
+    const weekdayIndices = [];
+    const weekdayDates = allDates.filter((d, i) => { if (isWeekday(d)) { weekdayIndices.push(i); return true; } return false; });
+    const dateLabels = weekdayDates.map((d) => formatDate(d));
+
+    const callsDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].calls),
+      borderColor: agentColor(i),
+      backgroundColor: agentColor(i),
+      borderWidth: 2, tension: 0.3, pointRadius: 3, fill: false,
+    }));
+    const timeDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => Math.round(agent.daily[di].talkTime / 60)),
+      borderColor: agentColor(i),
+      backgroundColor: agentColor(i),
+      borderWidth: 2, tension: 0.3, pointRadius: 3, fill: false,
+    }));
+    const longDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].longCalls || 0),
+      borderColor: agentColor(i),
+      backgroundColor: agentColor(i),
+      borderWidth: 2, tension: 0.3, pointRadius: 3, fill: false,
+    }));
+
+    // Team average per day (weekdays only) — always team-wide, regardless of user filter
+    const teamAvgDaily = reportData?.teamAvgDaily || [];
+    const avgCalls = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.calls || 0) * 10) / 10);
+    const avgTime = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.talkTime || 0) / 60 * 10) / 10);
+    const avgLong = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.longCalls || 0) * 10) / 10);
+
+    callsDatasets.push({ label: 'Team Avg', data: avgCalls, ...avgLineStyle });
+    timeDatasets.push({ label: 'Team Avg', data: avgTime, ...avgLineStyle });
+    longDatasets.push({ label: 'Team Avg', data: avgLong, ...avgLineStyle });
+
+    const lineOpts = (title, yLabel) => ({
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: tickColor, font: { size: 11 } } }, title: { display: true, text: title, color: tickColor } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: tickColor } },
+        y: { beginAtZero: true, title: { display: true, text: yLabel, color: tickColor }, grid: { color: gridColor }, ticks: { color: tickColor } },
+      },
+    });
+
+    agentCallsChart = new Chart(callsCtx, { type: 'line', data: { labels: dateLabels, datasets: callsDatasets }, options: lineOpts('Calls Handled', 'Calls') });
+    agentTimeChart = new Chart(timeCtx, { type: 'line', data: { labels: dateLabels, datasets: timeDatasets }, options: lineOpts('Talk Time', 'Minutes') });
+    agentLongChart = new Chart(longCtx, { type: 'line', data: { labels: dateLabels, datasets: longDatasets }, options: lineOpts('30 Min+ Calls', 'Calls') });
+    return;
+  }
+
+  const isStacked = chartType === 'stacked';
+
+  if (isStacked && agentDailyData && allDates && allDates.length > 1) {
+    // Stacked bar: each agent is a dataset, x-axis = weekdays
+    const weekdayIndices = [];
+    const weekdayDates = allDates.filter((d, i) => { if (isWeekday(d)) { weekdayIndices.push(i); return true; } return false; });
+    const dateLabels = weekdayDates.map((d) => formatDate(d));
+
+    const callsDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].calls),
+      backgroundColor: agentColor(i),
+      borderRadius: 2,
+    }));
+    const timeDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => Math.round(agent.daily[di].talkTime / 60)),
+      backgroundColor: agentColor(i),
+      borderRadius: 2,
+    }));
+    const longDatasets = agentDailyData.map((agent, i) => ({
+      label: agent.agentName,
+      data: weekdayIndices.map((di) => agent.daily[di].longCalls || 0),
+      backgroundColor: agentColor(i),
+      borderRadius: 2,
+    }));
+
+    // Team average per day — always team-wide, regardless of user filter
+    const teamAvgDaily = reportData?.teamAvgDaily || [];
+    const avgCalls = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.calls || 0) * 10) / 10);
+    const avgTime = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.talkTime || 0) / 60 * 10) / 10);
+    const avgLong = weekdayIndices.map((di) => Math.round((teamAvgDaily[di]?.longCalls || 0) * 10) / 10);
+
+    callsDatasets.push({ label: 'Team Avg', type: 'line', data: avgCalls, ...avgLineStyle });
+    timeDatasets.push({ label: 'Team Avg', type: 'line', data: avgTime, ...avgLineStyle });
+    longDatasets.push({ label: 'Team Avg', type: 'line', data: avgLong, ...avgLineStyle });
+
+    const stackedOpts = (title, yLabel) => ({
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: tickColor, font: { size: 11 } } }, title: { display: true, text: title, color: tickColor } },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { color: tickColor } },
+        y: { stacked: true, beginAtZero: true, title: { display: true, text: yLabel, color: tickColor }, grid: { color: gridColor }, ticks: { color: tickColor } },
+      },
+    });
+
+    agentCallsChart = new Chart(callsCtx, { type: 'bar', data: { labels: dateLabels, datasets: callsDatasets }, options: stackedOpts('Calls Handled', 'Calls') });
+    agentTimeChart = new Chart(timeCtx, { type: 'bar', data: { labels: dateLabels, datasets: timeDatasets }, options: stackedOpts('Talk Time', 'Minutes') });
+    agentLongChart = new Chart(longCtx, { type: 'bar', data: { labels: dateLabels, datasets: longDatasets }, options: stackedOpts('30 Min+ Calls', 'Calls') });
+    return;
+  }
+
+  // Bar chart: agents on x-axis with average line — always team-wide
+  const labels = sorted.map((a) => a.agentName);
+  const teamOverall = reportData?.teamAvgOverall || { calls: 0, talkTime: 0, longCalls: 0 };
+  const avgCalls = Math.round(teamOverall.calls * 10) / 10;
+  const avgTime = Math.round(teamOverall.talkTime / 60 * 10) / 10;
+  const avgLong = Math.round((teamOverall.longCalls || 0) * 10) / 10;
+
+  const barOpts = (title, yLabel) => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: tickColor, font: { size: 11 } } }, title: { display: true, text: title, color: tickColor } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: tickColor } },
+      y: { beginAtZero: true, title: { display: true, text: yLabel, color: tickColor }, grid: { color: gridColor }, ticks: { color: tickColor } },
+    },
+  });
+
+  agentCallsChart = new Chart(callsCtx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Calls Handled', data: sorted.map((a) => a.callsHandled), backgroundColor: sorted.map((_, i) => agentColor(i)), borderRadius: 3 },
+      { label: `Avg (${avgCalls})`, type: 'line', data: Array(count).fill(avgCalls), ...avgLineStyle },
+    ] },
+    options: barOpts('Calls Handled', 'Calls'),
+  });
+  agentTimeChart = new Chart(timeCtx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Talk Time (min)', data: sorted.map((a) => Math.round(a.totalTalkTime / 60)), backgroundColor: sorted.map((_, i) => agentColor(i)), borderRadius: 3 },
+      { label: `Avg (${avgTime})`, type: 'line', data: Array(count).fill(avgTime), ...avgLineStyle },
+    ] },
+    options: barOpts('Talk Time', 'Minutes'),
+  });
+  agentLongChart = new Chart(longCtx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: '30 Min+ Calls', data: sorted.map((a) => a.longCalls || 0), backgroundColor: sorted.map((_, i) => agentColor(i)), borderRadius: 3 },
+      { label: `Avg (${avgLong})`, type: 'line', data: Array(count).fill(avgLong), ...avgLineStyle },
+    ] },
+    options: barOpts('30 Min+ Calls', 'Calls'),
+  });
+}
+
+// -- Render: Calls Detail --
+let callSearch = '';
+let callSortKey = 'startTime';
+let callSortDir = 'desc';
+
+// Caller/company names arrive from Salesforce, so keep them out of the HTML parser.
+function escapeHtml(val) {
+  return String(val ?? '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
+function formatCallStatus(status) {
+  if (!status) return '--';
+  return String(status).toLowerCase().split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+const CALL_COLUMNS = {
+  startTime:     { label: 'Date / Time', sortVal: (c) => (c.startTime ? new Date(c.startTime).getTime() : 0) },
+  agentName:     { label: 'Agent',       sortVal: (c) => c.agentName || '' },
+  direction:     { label: 'Direction',   sortVal: (c) => c.direction || '' },
+  status:        { label: 'Status',      sortVal: (c) => c.status || '' },
+  callerNumber:  { label: 'Caller',      sortVal: (c) => c.callerNumber || '' },
+  callerName:    { label: 'Name',        sortVal: (c) => c.callerName || '' },
+  companyName:   { label: 'Company',     sortVal: (c) => c.companyName || '' },
+  duration:      { label: 'Duration',    sortVal: (c) => c.duration || 0 },
+  queueDuration: { label: 'Queue',       sortVal: (c) => c.queueDuration || 0 },
+  caseNumber:    { label: 'Case #',      sortVal: (c) => c.caseNumber || '' },
+  callLink:      { label: 'Recording',   sortVal: null },
+};
+
+function renderCallDetail(data) {
+  const detail = data || { total: 0, truncated: 0, records: [] };
+  document.getElementById('call-detail-count').textContent = detail.total || 0;
+  document.getElementById('call-detail-note').textContent = detail.truncated
+    ? `showing the ${detail.records.length.toLocaleString()} most recent of ${detail.total.toLocaleString()} — narrow the date range to see the rest`
+    : '';
+  renderCallDetailTable(detail.records);
+}
+
+function renderCallDetailTable(records) {
+  const container = document.getElementById('call-detail-table');
+  if (!records || records.length === 0) {
+    container.innerHTML = '<div class="empty">No calls for this period</div>';
+    return;
+  }
+
+  // Filter
+  const q = callSearch.toLowerCase().trim();
+  const filtered = q ? records.filter((c) =>
+    [c.agentName, c.direction, formatCallStatus(c.status), c.callerNumber, c.callerName, c.companyName, c.caseNumber]
+      .some((v) => v && String(v).toLowerCase().includes(q))
+  ) : records;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty">No calls match your search</div>';
+    return;
+  }
+
+  // Sort
+  let sorted = filtered;
+  if (callSortKey && CALL_COLUMNS[callSortKey]?.sortVal) {
+    const sv = CALL_COLUMNS[callSortKey].sortVal;
+    sorted = [...filtered].sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return callSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return callSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const colKeys = Object.keys(CALL_COLUMNS);
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of colKeys) {
+    const col = CALL_COLUMNS[key];
+    if (!col.sortVal) {
+      html += `<th>${col.label}</th>`;
+      continue;
+    }
+    const active = callSortKey === key;
+    const indicator = active ? (callSortDir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-call-sort="${key}">${col.label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const c of sorted) {
+    const caseCell = c.caseNumber && c.caseId
+      ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${encodeURIComponent(c.caseId)}/view" target="_blank" rel="noopener">${escapeHtml(c.caseNumber)}</a>`
+      : escapeHtml(c.caseNumber || '--');
+    const recordingCell = c.callLink
+      ? `<a href="${escapeHtml(c.callLink)}" target="_blank" rel="noopener">Listen</a>`
+      : '--';
+    // Over-8-hour calls are excluded from the stats above; mark them here so the
+    // numbers reconcile instead of looking like a discrepancy.
+    const durationCell = c.duration == null
+      ? '--'
+      : `${formatSeconds(c.duration)}${c.flagged ? ' <span class="text-danger small">(flagged)</span>' : ''}`;
+    html += `<tr>
+      <td>${formatCaseDate(c.startTime)}</td>
+      <td>${escapeHtml(c.agentName || '--')}</td>
+      <td>${escapeHtml(c.direction)}${c.callbackRequested ? ' <span class="text-muted small">(callback)</span>' : ''}</td>
+      <td>${escapeHtml(formatCallStatus(c.status))}</td>
+      <td>${escapeHtml(c.callerNumber || '--')}</td>
+      <td>${escapeHtml(c.callerName || '--')}</td>
+      <td>${escapeHtml(c.companyName || '--')}</td>
+      <td>${durationCell}</td>
+      <td>${c.queueDuration == null ? '--' : formatSeconds(c.queueDuration)}</td>
+      <td>${caseCell}</td>
+      <td>${recordingCell}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-call-sort]');
+    if (!th) return;
+    const key = th.dataset.callSort;
+    if (callSortKey === key) {
+      if (callSortDir === 'asc') {
+        callSortDir = 'desc';
+      } else {
+        callSortKey = null;
+        callSortDir = 'asc';
+      }
+    } else {
+      callSortKey = key;
+      callSortDir = 'asc';
+    }
+    renderCallDetailTable(reportData.callDetail.records);
+  });
+}
+
+// -- Render: Salesforce Cases --
+let caseSearch = '';
+let caseSortKey = 'createdDate';
+let caseSortDir = 'desc';
+
+const CASE_COLUMNS = {
+  caseNumber:  { label: 'Case #',      sortVal: (c) => c.caseNumber || '' },
+  status:      { label: 'Status',      sortVal: (c) => c.status || '' },
+  accountName: { label: 'Account',     sortVal: (c) => c.accountName || '' },
+  techName:    { label: 'Tech',        sortVal: (c) => c.techName || '' },
+  ownerName:   { label: 'Owner',       sortVal: (c) => c.ownerName || '' },
+  createdDate: { label: 'Created',     sortVal: (c) => c.createdDate ? new Date(c.createdDate).getTime() : 0 },
+  closedDate:  { label: 'Closed',      sortVal: (c) => c.closedDate ? new Date(c.closedDate).getTime() : 0 },
+};
+
+function formatCaseDate(dateStr) {
+  if (!dateStr) return '--';
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderCases(data) {
+  const { stats, records } = data;
+
+  // Stats cards
+  const cards = [
+    { value: stats.total, label: 'Total Cases', cls: '' },
+    { value: stats.open, label: 'Open', cls: 'stat-outbound' },
+    { value: stats.closed, label: 'Closed', cls: 'stat-answered' },
+  ];
+  document.getElementById('cases-stats').innerHTML = cards.map((c) => `
+    <div class="col"><div class="card stat-card ${c.cls} p-2">
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-label">${c.label}</div>
+    </div></div>
+  `).join('');
+  document.getElementById('cases-count').textContent = stats.total;
+
+  renderCaseTable(records);
+}
+
+function renderCaseTable(records) {
+  const container = document.getElementById('cases-table');
+  if (!records || records.length === 0) {
+    container.innerHTML = '<div class="empty">No cases for this period</div>';
+    return;
+  }
+
+  // Filter
+  const q = caseSearch.toLowerCase().trim();
+  const filtered = q ? records.filter((c) =>
+    [c.caseNumber, c.status, c.accountName, c.techName, c.ownerName, c.subject]
+      .some((v) => v && v.toLowerCase().includes(q))
+  ) : records;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty">No cases match your search</div>';
+    return;
+  }
+
+  // Sort
+  let sorted = filtered;
+  if (caseSortKey && CASE_COLUMNS[caseSortKey]) {
+    const sv = CASE_COLUMNS[caseSortKey].sortVal;
+    sorted = [...filtered].sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return caseSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return caseSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const colKeys = Object.keys(CASE_COLUMNS);
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of colKeys) {
+    const active = caseSortKey === key;
+    const indicator = active ? (caseSortDir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-case-sort="${key}">${CASE_COLUMNS[key].label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const c of sorted) {
+    const sfLink = `https://ipdatatel.lightning.force.com/lightning/r/Case/${c.id}/view`;
+    html += `<tr>
+      <td><a href="${sfLink}" target="_blank" rel="noopener">${c.caseNumber || '--'}</a></td>
+      <td>${c.status || '--'}</td>
+      <td>${c.accountName}</td>
+      <td>${c.techName}</td>
+      <td>${c.ownerName}</td>
+      <td>${formatCaseDate(c.createdDate)}</td>
+      <td>${formatCaseDate(c.closedDate)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-case-sort]');
+    if (!th) return;
+    const key = th.dataset.caseSort;
+    if (caseSortKey === key) {
+      if (caseSortDir === 'asc') {
+        caseSortDir = 'desc';
+      } else {
+        caseSortKey = null;
+        caseSortDir = 'asc';
+      }
+    } else {
+      caseSortKey = key;
+      caseSortDir = 'asc';
+    }
+    renderCaseTable(reportData.cases.records);
+  });
+}
+
+// -- Export helpers --
+function getMetadata() {
+  const startDate = document.getElementById('start-date').value;
+  const endDate = document.getElementById('end-date').value;
+  const select = document.getElementById('team-member-select');
+  const teamMember = select.options[select.selectedIndex]?.text || 'All Team';
+  return { startDate, endDate, teamMember, generatedAt: new Date().toLocaleString() };
+}
+
+function escapeCSV(val) {
+  const str = String(val ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function getExportFilename(ext) {
+  const s = document.getElementById('start-date').value;
+  const e = document.getElementById('end-date').value;
+  return `report_${s}_${e}.${ext}`;
+}
+
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// -- CSV Export --
+function exportCSV() {
+  if (!reportData) return;
+  const meta = getMetadata();
+  const rows = [];
+  const row = (...cols) => rows.push(cols.map(escapeCSV).join(','));
+  const blank = () => rows.push('');
+
+  // Metadata
+  row('Report Generated', meta.generatedAt);
+  row('Date Range', `${meta.startDate} to ${meta.endDate}`);
+  row('Team Member', meta.teamMember);
+  blank();
+
+  // Call Volumes - Totals
+  row('CALL VOLUMES - TOTALS');
+  row('Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned', 'Total Talk Time');
+  const t = reportData.callVolumes.totals;
+  row(t.total, t.inbound, t.outbound, t.callbacks, t.abandoned, formatMinutes(t.totalTalkTime || 0));
+  blank();
+
+  // Call Volumes - Daily
+  row('CALL VOLUMES - DAILY');
+  row('Date', 'Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned');
+  for (const d of reportData.callVolumes.daily) {
+    row(d.date, d.total, d.inbound, d.outbound, d.callbacks, d.abandoned);
+  }
+  blank();
+
+  // Duration
+  row('DURATION / RESPONSIVENESS');
+  row('Avg Call Length', 'Longest Call', '30 Min+ Calls', 'Avg Speed of Answer', 'Avg Queue Time');
+  const dur = reportData.duration;
+  row(formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), dur.longCalls || 0, formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime));
+  blank();
+
+  // Agent Activity
+  row('AGENT ACTIVITY');
+  row('Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls');
+  for (const a of reportData.agentActivity) {
+    row(a.agentName, a.callsHandled, formatMinutes(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0);
+  }
+  {
+    const tc = reportData.agentActivity.reduce((s, a) => s + (a.callsHandled || 0), 0);
+    const tt = reportData.agentActivity.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+    const tl = reportData.agentActivity.reduce((s, a) => s + (a.longCalls || 0), 0);
+    row('Team Totals', tc, formatMinutes(tt), formatSeconds(tc > 0 ? Math.round(tt / tc) : 0), tl);
+  }
+  blank();
+
+  // Calls Detail
+  {
+    const cd = reportData.callDetail || { total: 0, truncated: 0, records: [] };
+    row('CALLS DETAIL');
+    if (cd.truncated) row(`Note: showing ${cd.records.length} most recent of ${cd.total} calls`);
+    row('Date / Time', 'Agent', 'Direction', 'Callback', 'Status', 'Caller', 'Name', 'Company', 'Duration', 'Queue', 'Flagged', 'Case #', 'Recording');
+    for (const c of cd.records) {
+      row(
+        formatCaseDate(c.startTime), c.agentName, c.direction, c.callbackRequested ? 'Yes' : '',
+        formatCallStatus(c.status), c.callerNumber || '', c.callerName || '', c.companyName || '',
+        c.duration == null ? '' : formatSeconds(c.duration),
+        c.queueDuration == null ? '' : formatSeconds(c.queueDuration),
+        c.flagged ? 'Yes' : '', c.caseNumber || '', c.callLink || ''
+      );
+    }
+    blank();
+  }
+
+  // Cases Summary
+  row('SALESFORCE CASES - SUMMARY');
+  row('Total', 'Open', 'Closed');
+  const cs = reportData.cases.stats;
+  row(cs.total, cs.open, cs.closed);
+  blank();
+
+  // Case Records
+  row('SALESFORCE CASES - RECORDS');
+  row('Case #', 'Status', 'Account', 'Tech', 'Owner', 'Created', 'Closed');
+  for (const c of reportData.cases.records) {
+    row(c.caseNumber, c.status, c.accountName, c.techName, c.ownerName, formatCaseDate(c.createdDate), formatCaseDate(c.closedDate));
+  }
+
+  downloadBlob(rows.join('\n'), getExportFilename('csv'), 'text/csv;charset=utf-8;');
+}
+
+// -- PDF Export --
+function exportPDF() {
+  if (!reportData) return;
+  if (typeof jspdf === 'undefined' && typeof window.jspdf === 'undefined') {
+    alert('PDF library failed to load. Please check your internet connection and refresh.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf || jspdf;
+  const doc = new jsPDF('l', 'mm', 'a4');
+  const pageHeight = doc.internal.pageSize.height;
+  const meta = getMetadata();
+  const blue = [0, 120, 212];
+
+  // Title
+  doc.setFontSize(18);
+  doc.text('Report', 14, 18);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(`Date Range: ${meta.startDate} to ${meta.endDate}`, 14, 26);
+  doc.text(`Team Member: ${meta.teamMember}`, 14, 32);
+  doc.text(`Generated: ${meta.generatedAt}`, 14, 38);
+  doc.setTextColor(0);
+
+  let yPos = 46;
+
+  function sectionHeading(title) {
+    if (yPos > pageHeight - 30) {
+      doc.addPage();
+      yPos = 14;
+    }
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(title, 14, yPos);
+    doc.setFont(undefined, 'normal');
+    yPos += 6;
+  }
+
+  const tableOpts = {
+    startY: () => yPos,
+    headStyles: { fillColor: blue, fontSize: 8 },
+    styles: { fontSize: 8 },
+    margin: { left: 14, right: 14 },
+  };
+
+  // Call Volumes - Totals
+  sectionHeading('Call Volumes - Totals');
+  const t = reportData.callVolumes.totals;
+  doc.autoTable({
+    ...tableOpts, startY: yPos,
+    head: [['Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned', 'Total Talk Time']],
+    body: [[t.total, t.inbound, t.outbound, t.callbacks, t.abandoned, formatMinutes(t.totalTalkTime || 0)]],
+  });
+  yPos = doc.lastAutoTable.finalY + 8;
+
+  // Call Volumes - Daily
+  sectionHeading('Call Volumes - Daily');
+  doc.autoTable({
+    ...tableOpts, startY: yPos,
+    head: [['Date', 'Total', 'Inbound', 'Outbound', 'Callbacks', 'Abandoned']],
+    body: reportData.callVolumes.daily.map((d) => [d.date, d.total, d.inbound, d.outbound, d.callbacks, d.abandoned]),
+  });
+  yPos = doc.lastAutoTable.finalY + 8;
+
+  // Duration
+  sectionHeading('Duration / Responsiveness');
+  const dur = reportData.duration;
+  doc.autoTable({
+    ...tableOpts, startY: yPos,
+    head: [['Avg Call Length', 'Longest Call', '30 Min+ Calls', 'Avg Speed of Answer', 'Avg Queue Time']],
+    body: [[formatSeconds(dur.avgCallDuration), formatSeconds(dur.longestCallDuration), dur.longCalls || 0, formatSeconds(dur.avgQueueTime), formatSeconds(dur.longestQueueTime)]],
+  });
+  yPos = doc.lastAutoTable.finalY + 8;
+
+  // Agent Activity
+  sectionHeading('Agent Activity');
+  {
+    const tc = reportData.agentActivity.reduce((s, a) => s + (a.callsHandled || 0), 0);
+    const tt = reportData.agentActivity.reduce((s, a) => s + (a.totalTalkTime || 0), 0);
+    const tl = reportData.agentActivity.reduce((s, a) => s + (a.longCalls || 0), 0);
+    doc.autoTable({
+      ...tableOpts, startY: yPos,
+      head: [['Agent', 'Calls Handled', 'Total Talk Time', 'Avg Call Length', '30 Min+ Calls']],
+      body: reportData.agentActivity.map((a) => [a.agentName, a.callsHandled, formatMinutes(a.totalTalkTime), formatSeconds(a.avgCallDuration), a.longCalls || 0]),
+      foot: [['Team Totals', tc, formatMinutes(tt), formatSeconds(tc > 0 ? Math.round(tt / tc) : 0), tl]],
+      footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', fontSize: 8 },
+    });
+  }
+  yPos = doc.lastAutoTable.finalY + 8;
+
+  // Calls Detail — trimmed to the columns that fit landscape A4; the CSV export
+  // carries the full set including caller name and recording links.
+  {
+    const cd = reportData.callDetail || { total: 0, truncated: 0, records: [] };
+    if (cd.records.length > 0) {
+      sectionHeading('Calls Detail');
+      if (cd.truncated) {
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(`Showing ${cd.records.length} most recent of ${cd.total} calls.`, 14, yPos);
+        doc.setTextColor(0);
+        yPos += 5;
+      }
+      doc.autoTable({
+        ...tableOpts, startY: yPos,
+        head: [['Date / Time', 'Agent', 'Direction', 'Status', 'Caller', 'Company', 'Duration', 'Queue', 'Case #']],
+        body: cd.records.map((c) => [
+          formatCaseDate(c.startTime), c.agentName, c.callbackRequested ? `${c.direction} (cb)` : c.direction,
+          formatCallStatus(c.status), c.callerNumber || '--', c.companyName || '--',
+          c.duration == null ? '--' : formatSeconds(c.duration),
+          c.queueDuration == null ? '--' : formatSeconds(c.queueDuration),
+          c.caseNumber || '--',
+        ]),
+      });
+      yPos = doc.lastAutoTable.finalY + 8;
+    }
+  }
+
+  // Cases Summary
+  sectionHeading('Salesforce Cases - Summary');
+  const cs = reportData.cases.stats;
+  doc.autoTable({
+    ...tableOpts, startY: yPos,
+    head: [['Total', 'Open', 'Closed']],
+    body: [[cs.total, cs.open, cs.closed]],
+  });
+  yPos = doc.lastAutoTable.finalY + 8;
+
+  // Case Records
+  if (reportData.cases.records.length > 0) {
+    sectionHeading('Salesforce Cases - Records');
+    doc.autoTable({
+      ...tableOpts, startY: yPos,
+      head: [['Case #', 'Status', 'Account', 'Tech', 'Owner', 'Created', 'Closed']],
+      body: reportData.cases.records.map((c) => [c.caseNumber, c.status, c.accountName, c.techName, c.ownerName, formatCaseDate(c.createdDate), formatCaseDate(c.closedDate)]),
+    });
+  }
+
+  doc.save(getExportFilename('pdf'));
+}
+
+// -- Team member dropdown --
+let pendingUserId = '';
+
+function populateTeamDropdown(userList) {
+  const select = document.getElementById('team-member-select');
+  const desiredVal = pendingUserId || select.value;
+  pendingUserId = '';
+  // Keep "All Team" option, replace the rest
+  select.innerHTML = '<option value="">All Team</option>';
+  for (const user of userList) {
+    const opt = document.createElement('option');
+    opt.value = user.id;
+    opt.textContent = user.name;
+    select.appendChild(opt);
+  }
+  // Restore previous selection if still valid
+  if (desiredVal && [...select.options].some((o) => o.value === desiredVal)) {
+    select.value = desiredVal;
+  }
+}
+
+// -- Generate report --
+async function generateReport() {
+  const startDate = document.getElementById('start-date').value;
+  const endDate = document.getElementById('end-date').value;
+  const userId = document.getElementById('team-member-select').value || pendingUserId;
+  if (!startDate || !endDate) return;
+
+  document.getElementById('reports-data').style.display = 'none';
+  document.getElementById('reports-error').style.display = 'none';
+  document.getElementById('reports-loading').style.display = '';
+
+  try {
+    reportData = await fetchReports(startDate, endDate, userId);
+    // Populate dropdown from the user list
+    if (reportData.userList && reportData.userList.length > 0) {
+      populateTeamDropdown(reportData.userList);
+    }
+    renderCallVolumes(reportData.callVolumes);
+    renderDuration(reportData.duration, reportData.teamDuration);
+    renderFlaggedCalls(reportData.flaggedCalls);
+    renderAgentActivity(reportData.agentActivity);
+    renderCallDetail(reportData.callDetail);
+    renderCases(reportData.cases);
+    // Show container before rendering charts so Chart.js can measure dimensions
+    document.getElementById('reports-data').style.display = '';
+    renderVolumeChart(reportData.callVolumes.daily);
+    renderAgentChart();
+    document.getElementById('export-csv-btn').disabled = false;
+    document.getElementById('export-pdf-btn').disabled = false;
+  } catch (err) {
+    console.error('Failed to generate report:', err);
+    const errorEl = document.getElementById('reports-error');
+    errorEl.querySelector('.card-body').textContent = err.message;
+    errorEl.style.display = '';
+    document.getElementById('export-csv-btn').disabled = true;
+    document.getElementById('export-pdf-btn').disabled = true;
+  } finally {
+    document.getElementById('reports-loading').style.display = 'none';
+  }
+}
+
+// -- Init --
+async function init() {
+  const basePath = location.pathname.replace(/\/[^/]*$/, '');
+  try {
+    // Topbar hydration lives in topbar.js — just read the resolved user for
+    // page-specific gating.
+    const user = await window.rcs.userPromise;
+
+    if (!user?.permissions?.reports) {
+      document.getElementById('access-denied').style.display = '';
+      return;
+    }
+
+    // Self-scoped users see only their own data — hide the team-member dropdown
+    // (server enforces the scope regardless, so this is just UI cleanup).
+    const canViewAll = user?.viewScopes?.reports === 'all';
+    if (!canViewAll) {
+      document.getElementById('team-member-select').style.display = 'none';
+    }
+
+    document.getElementById('reports-content').style.display = '';
+
+    // Set max dates to today
+    const todayStr = toLocalISODate(new Date());
+    document.getElementById('start-date').max = todayStr;
+    document.getElementById('end-date').max = todayStr;
+
+    // Restore saved filters (date range preset, custom dates, team member)
+    const dateRangeSelect = document.getElementById('date-range-select');
+    const customDateRange = document.getElementById('custom-date-range');
+    const validPresets = [...dateRangeSelect.options].map((o) => o.value);
+    const savedPreset = localStorage.getItem('reports_date_range');
+    const initialPreset = validPresets.includes(savedPreset) ? savedPreset : 'thisMonth';
+    dateRangeSelect.value = initialPreset;
+
+    if (initialPreset === 'custom') {
+      const sd = localStorage.getItem('reports_start_date');
+      const ed = localStorage.getItem('reports_end_date');
+      if (sd) document.getElementById('start-date').value = sd;
+      if (ed) document.getElementById('end-date').value = ed;
+      customDateRange.style.setProperty('display', 'flex', 'important');
+    } else {
+      const range = getPresetRange(initialPreset);
+      document.getElementById('start-date').value = range.startDate;
+      document.getElementById('end-date').value = range.endDate;
+    }
+
+    pendingUserId = localStorage.getItem('reports_user_id') || '';
+
+    function applyDateRange() {
+      const val = dateRangeSelect.value;
+      localStorage.setItem('reports_date_range', val);
+      if (val === 'custom') {
+        customDateRange.style.display = '';
+        customDateRange.style.setProperty('display', 'flex', 'important');
+      } else {
+        customDateRange.style.setProperty('display', 'none', 'important');
+        const r = getPresetRange(val);
+        if (r) {
+          document.getElementById('start-date').value = r.startDate;
+          document.getElementById('end-date').value = r.endDate;
+        }
+      }
+      generateReport();
+    }
+
+    dateRangeSelect.addEventListener('change', applyDateRange);
+
+    // Custom date inputs auto-generate
+    const onCustomDateChange = () => {
+      localStorage.setItem('reports_start_date', document.getElementById('start-date').value);
+      localStorage.setItem('reports_end_date', document.getElementById('end-date').value);
+      generateReport();
+    };
+    document.getElementById('start-date').addEventListener('change', onCustomDateChange);
+    document.getElementById('end-date').addEventListener('change', onCustomDateChange);
+
+    // Calls Detail search
+    document.getElementById('call-detail-search').addEventListener('input', (e) => {
+      callSearch = e.target.value;
+      if (reportData?.callDetail?.records) renderCallDetailTable(reportData.callDetail.records);
+    });
+
+    // Case search
+    document.getElementById('case-search').addEventListener('input', (e) => {
+      caseSearch = e.target.value;
+      if (reportData?.cases?.records) renderCaseTable(reportData.cases.records);
+    });
+
+    // Team member dropdown
+    document.getElementById('team-member-select').addEventListener('change', (e) => {
+      localStorage.setItem('reports_user_id', e.target.value);
+      generateReport();
+    });
+
+    // Export buttons
+    document.getElementById('export-csv-btn').addEventListener('click', exportCSV);
+    document.getElementById('export-pdf-btn').addEventListener('click', exportPDF);
+
+    // Chart type pickers (restore saved preference and re-render on change)
+    document.querySelectorAll('.chart-type-select').forEach((select) => {
+      const saved = localStorage.getItem(`chart_type_${select.id}`);
+      if (saved && [...select.options].some((o) => o.value === saved)) {
+        select.value = saved;
+      }
+      select.addEventListener('change', () => {
+        localStorage.setItem(`chart_type_${select.id}`, select.value);
+        if (reportData) {
+          if (select.id === 'volume-chart-type') renderVolumeChart(reportData.callVolumes.daily);
+          if (select.id === 'agent-chart-type') renderAgentChart();
+        }
+      });
+    });
+
+    // Chart toggle buttons
+    document.querySelectorAll('.chart-toggle').forEach((btn) => {
+      const targetId = btn.dataset.target;
+      const hidden = localStorage.getItem(`chart_hidden_${targetId}`) === '1';
+      if (hidden) {
+        document.getElementById(targetId).style.display = 'none';
+        btn.textContent = 'Show Chart';
+      }
+      btn.addEventListener('click', () => {
+        const el = document.getElementById(targetId);
+        const isHidden = el.style.display === 'none';
+        el.style.display = isHidden ? '' : 'none';
+        btn.textContent = isHidden ? 'Hide Chart' : 'Show Chart';
+        localStorage.setItem(`chart_hidden_${targetId}`, isHidden ? '0' : '1');
+      });
+    });
+
+    // Auto-generate on load
+    generateReport();
+  } catch (e) {
+    console.error('Failed to initialize reports:', e);
+  }
+}
+
+init();

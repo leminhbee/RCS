@@ -79,7 +79,7 @@ function isInWrapUp(userId) {
 }
 
 async function recoverWrapUps(logger) {
-  const wrapUpUsers = await atp.users.fetchAll({ currentStatus: 'WRAP-UP' });
+  const wrapUpUsers = await atp.users.fetchAll({ currentStatus: 'WRAP-UP', active: true });
 
   for (const user of wrapUpUsers) {
     const elapsed = Date.now() - new Date(user.statusSince).getTime();

@@ -1,4 +1,138 @@
 let dashboardData = { agents: [], queue: [], stats: {}, callLists: {} };
+let permissions = {};
+let isSuperAdmin = false;
+let isSupervisor = false;
+let selectedDate = null; // null = today (live mode)
+
+function isToday(dateStr) {
+  if (!dateStr) return true;
+  const d = new Date(dateStr + 'T00:00:00');
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+}
+
+async function fetchStatsForDate(dateStr) {
+  const basePath = location.pathname.replace(/\/$/, '');
+  const res = await fetch(`${basePath}/api/stats?date=${dateStr}`);
+  if (!res.ok) throw new Error('Failed to fetch stats');
+  return res.json();
+}
+
+// -- Call list column config --
+const DEFAULT_COLS = ['startTime', 'callerName', 'callerNumber', 'type', 'companyName', 'agentName', 'duration', 'queueDuration', 'endTime', 'sfCase', 'caseSubject'];
+const callType = (c) => {
+  if (c.status === 'ABANDONED') return 'Abandoned';
+  if (c.status === 'CALLBACK_FAILED') return 'CB Failed';
+  if (c.outbound) return 'Outbound';
+  if (c.callbackRequested) return 'Callback';
+  return 'Inbound';
+};
+function formatDateTime(time) {
+  if (!time) return '--';
+  return new Date(time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+const CALL_COLUMNS = {
+  startTime:     { label: 'Date/Time',     sortVal: c => c.startTime ? new Date(c.startTime).getTime() : 0, render: c => formatDateTime(c.startTime) },
+  callerName:    { label: 'Caller',        sortVal: c => c.callerName || '',                          render: c => c.callerName || '--' },
+  callerNumber:  { label: 'Phone',         sortVal: c => c.callerNumber || '',                        render: c => (c.callLink && c.callLink.startsWith('http')) ? `<a class="call-recording-link" href="${c.callLink}" target="_blank" rel="noopener">${c.callerNumber || '--'}</a>` : (c.callerNumber || '--') },
+  type:          { label: 'Type',          sortVal: c => callType(c),                                 render: c => callType(c) },
+  companyName:   { label: 'Company',       sortVal: c => c.companyName || '',                         render: c => c.companyName || '--' },
+  agentName:     { label: 'Agent',         sortVal: c => c.agentName || '',                           render: c => c.agentName || '--' },
+  duration:      { label: 'Call Duration', sortVal: c => c.duration || 0,                             render: c => formatSeconds(c.duration) },
+  queueDuration: { label: 'Queue Wait',    sortVal: c => c.queueDuration || 0,                        render: c => formatSeconds(c.queueDuration) },
+  endTime:       { label: 'Ended',         sortVal: c => c.endTime ? new Date(c.endTime).getTime() : 0, render: c => `<span class="js-end-time-ago" data-end="${c.endTime || ''}">${formatTimeAgo(c.endTime)}</span>` },
+  sfCase:        { label: 'SF Case',       sortVal: c => c.salesforceCaseNumber || '',                render: c => c.salesforceCaseId && c.salesforceCaseNumber ? `<a href="https://ipdatatel.lightning.force.com/lightning/r/Case/${c.salesforceCaseId}/view" target="_blank" rel="noopener">${c.salesforceCaseNumber}</a>` : '--' },
+  caseSubject:   { label: 'Subject',       sortVal: c => c.caseSubject || '',                         render: c => c.caseSubject || '--' },
+};
+let colOrder = [...DEFAULT_COLS];
+let colHidden = new Set();
+let callSearch = '';
+let sortKey = null;
+let sortDir = 'asc';
+
+function loadColPrefs() {
+  try {
+    const saved = localStorage.getItem('callListCols');
+    if (!saved) return;
+    const { order, hidden } = JSON.parse(saved);
+    if (Array.isArray(order)) {
+      const known = order.filter(k => CALL_COLUMNS[k]);
+      const added = DEFAULT_COLS.filter(k => !known.includes(k));
+      colOrder = [...known, ...added];
+    }
+    if (Array.isArray(hidden)) colHidden = new Set(hidden.filter(k => CALL_COLUMNS[k]));
+  } catch (e) {}
+}
+
+function saveColPrefs() {
+  localStorage.setItem('callListCols', JSON.stringify({ order: colOrder, hidden: [...colHidden] }));
+}
+
+let dragSrcKey = null;
+
+function renderColPicker() {
+  const panel = document.getElementById('col-picker-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  for (const key of colOrder) {
+    const col = CALL_COLUMNS[key];
+    const item = document.createElement('div');
+    item.className = 'col-picker-item';
+    item.dataset.key = key;
+    item.draggable = true;
+    item.innerHTML = `
+      <span class="col-picker-handle">&#8942;&#8942;</span>
+      <label class="col-picker-label">
+        <input type="checkbox" ${colHidden.has(key) ? '' : 'checked'}>
+        ${col.label}
+      </label>`;
+    item.querySelector('input').addEventListener('change', (e) => {
+      if (e.target.checked) colHidden.delete(key); else colHidden.add(key);
+      saveColPrefs();
+      renderCallList();
+    });
+    item.addEventListener('dragstart', (e) => {
+      dragSrcKey = key;
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      panel.querySelectorAll('.col-picker-item').forEach(el => el.classList.remove('drag-over'));
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      panel.querySelectorAll('.col-picker-item').forEach(el => el.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      if (dragSrcKey === key) return;
+      const srcIdx = colOrder.indexOf(dragSrcKey);
+      const dstIdx = colOrder.indexOf(key);
+      colOrder.splice(srcIdx, 1);
+      colOrder.splice(dstIdx, 0, dragSrcKey);
+      saveColPrefs();
+      renderColPicker();
+      renderCallList();
+    });
+    panel.appendChild(item);
+  }
+  const footer = document.createElement('div');
+  footer.className = 'col-picker-footer';
+  footer.innerHTML = '<button>Reset to defaults</button>';
+  footer.querySelector('button').addEventListener('click', () => {
+    colOrder = [...DEFAULT_COLS];
+    colHidden = new Set();
+    saveColPrefs();
+    renderColPicker();
+    renderCallList();
+  });
+  panel.appendChild(footer);
+}
 
 // Timezone toggle (only relevant if viewer is not in Central)
 const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -12,19 +146,6 @@ function formatLoginTime(dateStr) {
   return new Date(dateStr).toLocaleTimeString('en-US', opts);
 }
 
-// Theme toggle
-const toggle = document.getElementById('theme-toggle');
-const icon = document.getElementById('toggle-icon');
-function applyTheme(dark) {
-  document.body.classList.toggle('dark', dark);
-  icon.innerHTML = dark ? '&#9790;' : '&#9788;';
-  localStorage.setItem('theme', dark ? 'dark' : 'light');
-}
-toggle.addEventListener('click', () => {
-  applyTheme(!document.body.classList.contains('dark'));
-});
-applyTheme(localStorage.getItem('theme') === 'dark');
-
 function formatDuration(since) {
   if (!since) return '--';
   const seconds = Math.floor((Date.now() - new Date(since)) / 1000);
@@ -34,6 +155,30 @@ function formatDuration(since) {
   const s = seconds % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Time left on a callback's expiry timer, shown beside the wait time (which
+// still counts from startTime). Returns null for rows that aren't callbacks.
+function callbackTimerInfo(call) {
+  if (!call.callbackRequested) return null;
+  if (!call.callbackExpiresAt) {
+    return {
+      text: 'no timer',
+      cls: 'callback-timer none',
+      title: 'No expiry timer armed — one arms when an agent becomes available. Until then this callback stays in queue.',
+    };
+  }
+  const seconds = Math.ceil((new Date(call.callbackExpiresAt) - Date.now()) / 1000);
+  if (seconds <= 0) {
+    return { text: '0:00', cls: 'callback-timer urgent', title: 'Timer expired — being marked as failed' };
+  }
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return {
+    text: `${m}:${String(s).padStart(2, '0')}`,
+    cls: seconds <= 60 ? 'callback-timer urgent' : 'callback-timer',
+    title: 'Time left before this callback is automatically marked failed',
+  };
 }
 
 function statusClass(status) {
@@ -52,7 +197,9 @@ function renderAgents() {
   }
 
   const tzToggle = isCentral ? '' : `<span class="tz-toggle" id="tz-toggle" title="Switch timezone">${showCentral ? 'CT' : 'Local'}</span>`;
-  let html = `<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Name</th><th>Status</th><th>Duration</th><th>Login ${tzToggle}</th><th class="text-center">Calls Answered</th><th class="text-center">Outbound</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Call Duration</th></tr></thead><tbody>`;
+  const metricsHeaders = permissions.agentMetrics ? `<th>Login ${tzToggle}</th><th class="text-center">Calls Answered</th><th class="text-center">Outbound</th>` : '';
+  const timesCalledHeader = permissions.callCountByNumber ? '<th class="text-center">Times Called</th>' : '';
+  let html = `<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Name</th><th>Status</th><th>Duration</th>${metricsHeaders}${timesCalledHeader}<th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Call Duration</th></tr></thead><tbody>`;
   for (const agent of agents) {
     const sup = agent.supervisor ? '<span class="supervisor-tag">SUP</span>' : '';
     let stClass = statusClass(agent.status);
@@ -60,24 +207,25 @@ function renderAgents() {
       const secs = Math.floor((Date.now() - new Date(agent.statusSince)) / 1000);
       if (secs >= 1800) stClass = 'status-on-call-long';
     }
+    const metricsCells = permissions.agentMetrics ? `<td>${formatLoginTime(agent.lastLogin)}</td><td class="text-center">${agent.callsAnswered || 0}</td><td class="text-center">${agent.outboundCalls || 0}</td>` : '';
+    const timesCalledCell = permissions.callCountByNumber ? `<td class="text-center">${agent.activeCall ? (() => { const counts = dashboardData.liveCallCountByNumber || dashboardData.callCountByNumber; const cnt = counts?.[agent.activeCall.callerNumber] || 0; return cnt > 1 ? `<span class="repeat-caller-badge">${cnt}</span>` : (cnt || ''); })() : ''}</td>` : '';
+    const canClearCalls = isSupervisor || isSuperAdmin;
     const callDurationCell = agent.activeCall
       ? `${formatDuration(agent.activeCall.startTime)}${
-          agent.activeCall.status === 'ACTIVE'
+          agent.activeCall.status === 'ACTIVE' && canClearCalls
             ? ` <button class="agent-call-clear-btn" data-id="${agent.activeCall.id}" title="Clear stuck call">&times;</button>`
             : ''
         }`
       : '';
-    html += `<tr>
+    html += `<tr data-agent-id="${agent.id}">
       <td>${agent.name}${sup}</td>
-      <td><span class="status ${stClass}">${agent.status || '--'}</span></td>
-      <td class="duration">${formatDuration(agent.statusSince)}</td>
-      <td>${formatLoginTime(agent.lastLogin)}</td>
-      <td class="text-center">${agent.callsAnswered || 0}</td>
-      <td class="text-center">${agent.outboundCalls || 0}</td>
+      <td><span class="status js-status ${stClass}" data-since="${agent.statusSince}">${agent.status || '--'}</span></td>
+      <td class="duration js-duration-status">${formatDuration(agent.statusSince)}</td>
+      ${metricsCells}${timesCalledCell}
       <td>${agent.activeCall ? agent.activeCall.callerNumber : ''}</td>
       <td>${agent.activeCall?.callerName || ''}</td>
       <td>${agent.activeCall?.companyName || ''}</td>
-      <td class="duration">${callDurationCell}</td>
+      <td class="duration js-duration-call" data-start="${agent.activeCall?.startTime || ''}">${callDurationCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -105,6 +253,34 @@ function renderAgents() {
   });
 }
 
+function renderAgentsTick() {
+  const agents = dashboardData.agents;
+  document.getElementById('agent-count').textContent = agents.length;
+  const byId = new Map(agents.map(a => [a.id, a]));
+  document.querySelectorAll('#agents-table tbody tr[data-agent-id]').forEach((row) => {
+    const agent = byId.get(row.dataset.agentId);
+    if (!agent) return;
+
+    const statusCell = row.querySelector('.js-duration-status');
+    if (statusCell) statusCell.textContent = formatDuration(agent.statusSince);
+
+    const callCell = row.querySelector('.js-duration-call');
+    if (callCell && agent.activeCall) {
+      // Rewrite only the leading text node so the clear button (if present) survives.
+      const text = formatDuration(agent.activeCall.startTime);
+      const firstText = [...callCell.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
+      if (firstText) firstText.nodeValue = callCell.querySelector('button') ? text + ' ' : text;
+      else callCell.prepend(document.createTextNode(text));
+    }
+
+    const statusEl = row.querySelector('.js-status');
+    if (statusEl && (agent.status === 'ENGAGED' || agent.status === 'OUTBOUND')) {
+      const secs = Math.floor((Date.now() - new Date(agent.statusSince)) / 1000);
+      statusEl.classList.toggle('status-on-call-long', secs >= 1800);
+    }
+  });
+}
+
 function renderQueue() {
   const container = document.getElementById('queue-table');
   const queue = dashboardData.queue;
@@ -115,35 +291,81 @@ function renderQueue() {
     return;
   }
 
-  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th><th>Status</th><th></th></tr></thead><tbody>';
+  const canClearCalls = isSupervisor || isSuperAdmin;
+  const queueTimesCalledHeader = permissions.callCountByNumber ? '<th class="text-center">Times Called</th>' : '';
+  const removeHeader = canClearCalls ? '<th></th>' : '';
+  let html = `<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>#</th><th>Caller Number</th><th>Caller Name</th><th>Company</th><th>Wait Time</th>${queueTimesCalledHeader}<th>Status</th>${removeHeader}</tr></thead><tbody>`;
   for (let i = 0; i < queue.length; i++) {
     const call = queue[i];
     const tag = call.ringing ? '<span class="status status-ringing">Ringing</span>'
       : call.callbackRequested ? '<span class="callback-tag">Callback</span>' : '';
-    html += `<tr>
+    const cbTimer = callbackTimerInfo(call);
+    const queueTimesCalledCell = permissions.callCountByNumber ? (() => {
+      const counts = dashboardData.liveCallCountByNumber || dashboardData.callCountByNumber;
+      const cnt = counts?.[call.callerNumber] || 0;
+      return `<td class="text-center">${cnt > 1 ? `<span class="repeat-caller-badge">${cnt}</span>` : (cnt || '--')}</td>`;
+    })() : '';
+    const removeCell = canClearCalls
+      ? `<td><button class="queue-remove-btn" data-id="${call.id}" title="Remove from queue">&times;</button></td>`
+      : '';
+    html += `<tr data-call-id="${call.id}">
       <td>${i + 1}</td>
       <td>${call.callerNumber || '--'}</td>
       <td>${call.callerName || '--'}</td>
       <td>${call.companyName || '--'}</td>
-      <td class="duration">${formatDuration(call.startTime)}</td>
+      <td class="duration js-duration-wait" data-start="${call.startTime}"><span class="js-wait-value">${formatDuration(call.startTime)}</span>${cbTimer ? `<span class="js-callback-timer ${cbTimer.cls}" title="${cbTimer.title}">${cbTimer.text}</span>` : ''}</td>
+      ${queueTimesCalledCell}
       <td>${tag}</td>
-      <td><button class="queue-remove-btn" data-id="${call.id}" title="Remove from queue">&times;</button></td>
+      ${removeCell}
     </tr>`;
   }
   html += '</tbody></table>';
   container.innerHTML = html;
 
   container.querySelectorAll('.queue-remove-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Remove this call from the queue?')) return;
-      btn.disabled = true;
-      try {
-        const basePath = location.pathname.replace(/\/$/, '');
-        await fetch(`${basePath}/api/queue/${btn.dataset.id}`, { method: 'DELETE' });
-      } catch (e) {
-        console.error('Failed to remove call:', e);
-      }
+    btn.addEventListener('click', () => {
+      const modal = document.getElementById('confirm-remove-modal');
+      const confirmBtn = document.getElementById('confirm-remove-btn');
+      const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
+      // Replace handler each time to bind the correct call ID
+      const handler = async () => {
+        confirmBtn.removeEventListener('click', handler);
+        bsModal.hide();
+        btn.disabled = true;
+        try {
+          const basePath = location.pathname.replace(/\/$/, '');
+          await fetch(`${basePath}/api/queue/${btn.dataset.id}`, { method: 'DELETE' });
+        } catch (e) {
+          console.error('Failed to remove call:', e);
+        }
+      };
+      confirmBtn.addEventListener('click', handler);
+      modal.addEventListener('hidden.bs.modal', () => {
+        confirmBtn.removeEventListener('click', handler);
+      }, { once: true });
+      bsModal.show();
     });
+  });
+}
+
+function renderQueueTick() {
+  const queue = dashboardData.queue;
+  document.getElementById('queue-count').textContent = queue.length;
+  const byId = new Map(queue.map(c => [c.id, c]));
+  document.querySelectorAll('#queue-table tbody tr[data-call-id]').forEach((row) => {
+    const call = byId.get(row.dataset.callId);
+    if (!call) return;
+    // Update the wait value and the countdown as separate spans rather than
+    // rewriting the cell, so a text selection in the row survives the tick.
+    const cell = row.querySelector('.js-wait-value');
+    if (cell) cell.textContent = formatDuration(call.startTime);
+    const timerEl = row.querySelector('.js-callback-timer');
+    const cbTimer = timerEl && callbackTimerInfo(call);
+    if (timerEl && cbTimer) {
+      timerEl.textContent = cbTimer.text;
+      timerEl.className = `js-callback-timer ${cbTimer.cls}`;
+      timerEl.title = cbTimer.title;
+    }
   });
 }
 
@@ -201,6 +423,7 @@ function renderLive() {
 }
 
 function renderStats() {
+  if (!permissions.stats) return;
   const s = dashboardData.stats || {};
   const grid = document.getElementById('stats-grid');
   const cards = [
@@ -224,6 +447,7 @@ function renderStats() {
 }
 
 function renderCallList() {
+  if (!permissions.callLists) return;
   const container = document.getElementById('recent-calls-table');
   const selected = document.getElementById('call-list-select').value;
   const calls = (dashboardData.callLists || {})[selected] || [];
@@ -233,22 +457,126 @@ function renderCallList() {
     return;
   }
 
-  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Caller</th><th>Company</th><th>Agent</th><th>Call Duration</th><th>Queue Wait</th><th>Ended</th></tr></thead><tbody>';
-  for (const call of calls) {
+  const q = callSearch.toLowerCase().trim();
+  const filtered = q ? calls.filter(c => [
+    c.callerName, c.callerNumber, c.companyName, c.agentName, c.salesforceCaseNumber,
+  ].some(v => v && v.toLowerCase().includes(q))) : calls;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty">No calls match your search</div>';
+    return;
+  }
+
+  let sorted = filtered;
+  if (sortKey && CALL_COLUMNS[sortKey]) {
+    const sv = CALL_COLUMNS[sortKey].sortVal;
+    sorted = [...filtered].sort((a, b) => {
+      const av = sv(a), bv = sv(b);
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  const visibleCols = colOrder.filter(k => !colHidden.has(k));
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of visibleCols) {
+    const active = sortKey === key;
+    const indicator = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    html += `<th class="sort-th${active ? ' sort-active' : ''}" data-sort-key="${key}">${CALL_COLUMNS[key].label}${indicator}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const call of sorted) {
+    html += '<tr>';
+    for (const key of visibleCols) html += `<td>${CALL_COLUMNS[key].render(call)}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  container.querySelector('thead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-sort-key]');
+    if (!th) return;
+    const key = th.dataset.sortKey;
+    if (sortKey === key) {
+      if (sortDir === 'asc') {
+        sortDir = 'desc';
+      } else {
+        sortKey = null;
+        sortDir = 'asc';
+      }
+    } else {
+      sortKey = key;
+      sortDir = 'asc';
+    }
+    renderCallList();
+  });
+}
+
+function renderCallListTick() {
+  document.querySelectorAll('#recent-calls-table .js-end-time-ago[data-end]').forEach((el) => {
+    el.textContent = formatTimeAgo(el.dataset.end);
+  });
+}
+
+function renderRepeatCallers() {
+  if (!permissions.repeatCallers) return;
+  const container = document.getElementById('repeat-callers-table');
+  if (!container) return;
+
+  const rc = dashboardData.repeatCallers || [];
+  const countEl = document.getElementById('repeat-callers-count');
+  if (countEl) countEl.textContent = rc.length;
+
+  if (rc.length === 0) {
+    container.innerHTML = '<div class="empty">No repeat callers today</div>';
+    return;
+  }
+
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr><th>Caller Number</th><th>Caller Name</th><th>Company</th><th class="text-center">Times Called</th><th></th></tr></thead><tbody>';
+  for (const caller of rc) {
     html += `<tr>
-      <td>${call.callerName || '--'}</td>
-      <td>${call.companyName || '--'}</td>
-      <td>${call.agentName || '--'}</td>
-      <td>${formatSeconds(call.duration)}</td>
-      <td>${formatSeconds(call.queueDuration)}</td>
-      <td>${formatTimeAgo(call.endTime)}</td>
+      <td>${caller.callerNumber}</td>
+      <td>${caller.callerName || '--'}</td>
+      <td>${caller.companyName || '--'}</td>
+      <td class="text-center"><span class="repeat-caller-badge">${caller.count}</span></td>
+      <td><button class="btn btn-sm btn-outline-primary repeat-caller-detail-btn" data-number="${caller.callerNumber}">View Calls</button></td>
     </tr>`;
   }
   html += '</tbody></table>';
   container.innerHTML = html;
+
+  container.querySelectorAll('.repeat-caller-detail-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const number = btn.dataset.number;
+      const match = rc.find(r => r.callerNumber === number);
+      if (match) showRepeatCallerModal(match);
+    });
+  });
 }
 
-document.getElementById('call-list-select').addEventListener('change', renderCallList);
+function showRepeatCallerModal(repeatCaller) {
+  const modal = document.getElementById('repeat-caller-modal');
+  const title = document.getElementById('repeat-caller-modal-title');
+  const body = document.getElementById('repeat-caller-modal-body');
+
+  title.textContent = `Calls from ${repeatCaller.callerNumber} (${repeatCaller.companyName || '--'})`;
+
+  const visibleCols = colOrder.filter(k => !colHidden.has(k));
+  let html = '<table class="table table-striped table-hover table-sm mb-0"><thead><tr>';
+  for (const key of visibleCols) {
+    html += `<th>${CALL_COLUMNS[key].label}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const call of repeatCaller.calls) {
+    html += '<tr>';
+    for (const key of visibleCols) html += `<td>${CALL_COLUMNS[key].render(call)}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  body.innerHTML = html;
+  bootstrap.Modal.getOrCreateInstance(modal).show();
+}
 
 function render() {
   renderAgents();
@@ -256,6 +584,145 @@ function render() {
   renderLive();
   renderStats();
   renderCallList();
+  renderRepeatCallers();
+}
+
+// -- Init: inject sections based on permissions and connect WS --
+async function init() {
+  const basePath = location.pathname.replace(/\/$/, '');
+  try {
+    // Profile hydration + admin menu reveals are done centrally by topbar.js.
+    // We just consume the resolved user for our own permission-gated setup.
+    const user = await window.rcs.userPromise;
+    permissions = user?.permissions || {};
+    isSuperAdmin = !!user?.superAdmin;
+    isSupervisor = !!user?.supervisor;
+
+    if (user?.supervisor) {
+      // Only the dashboard needs the live-active card; not part of the shared
+      // topbar hydration.
+      const lc = document.getElementById('live-active-card');
+      if (lc) lc.style.display = '';
+    }
+
+    // Preferences / User Permissions / Dashboard Settings / Announcement
+    // Compose are wired by their own scripts (preferences-panel.js,
+    // user-flags-panel.js, dashboard-settings-panel.js, announcement-compose.js)
+    // which listen for rcs:user-loaded — no init calls needed here.
+
+    // Build stats container based on permissions
+    const hasAnyStatsSection = permissions.repeatCallers || permissions.stats || permissions.callLists;
+    if (hasAnyStatsSection) {
+      let statsHTML = '';
+
+      if (permissions.repeatCallers) {
+        statsHTML += `
+        <div class="card mb-3">
+          <div class="card-header d-flex align-items-center gap-2" style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#repeat-callers-collapse" aria-expanded="true" aria-controls="repeat-callers-collapse">
+            <span class="collapse-chevron" id="repeat-callers-chevron">&#9660;</span>
+            <strong>Repeat Callers</strong> <span class="count" id="repeat-callers-count">0</span>
+          </div>
+          <div class="collapse show" id="repeat-callers-collapse">
+            <div class="card-body p-0" id="repeat-callers-table"></div>
+          </div>
+        </div>`;
+      }
+
+      if (permissions.stats || permissions.callLists) {
+        statsHTML += `
+        <div class="card mb-3">
+          <div class="card-header d-flex align-items-center gap-2">
+            <strong id="stats-title">Today's Stats</strong>
+            <input type="date" id="stats-date-picker" class="form-control form-control-sm ms-auto" style="width:auto" title="Select a date">
+          </div>
+          <div class="card-body">
+            ${permissions.stats ? '<div class="row g-2 mb-3" id="stats-grid"></div>' : ''}
+            ${permissions.callLists ? `
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <select class="call-list-select" id="call-list-select">
+                <option value="allCalls">All Calls</option>
+                <option value="recentCalls">Recent Calls</option>
+                <option value="longestCalls">Longest Calls</option>
+                <option value="longestQueue">Longest Queue</option>
+                <option value="abandonedCalls">Abandoned Calls</option>
+              </select>
+              <input type="search" id="call-search" class="form-control form-control-sm" style="min-width:180px;max-width:250px" placeholder="Search…" autocomplete="off">
+              <div class="dropdown ms-auto">
+                <button class="col-picker-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="col-picker-btn">&#9881; Columns</button>
+                <div class="dropdown-menu dropdown-menu-end col-picker-panel" id="col-picker-panel"></div>
+              </div>
+            </div>
+            <div id="recent-calls-table"></div>` : ''}
+          </div>
+        </div>`;
+      }
+
+      document.getElementById('stats-container').innerHTML = statsHTML;
+
+      if (permissions.callLists) {
+        document.getElementById('call-list-select').addEventListener('change', renderCallList);
+        document.getElementById('call-search').addEventListener('input', (e) => {
+          callSearch = e.target.value;
+          renderCallList();
+        });
+        renderColPicker();
+      }
+
+      if (permissions.repeatCallers) {
+        const rcCollapse = document.getElementById('repeat-callers-collapse');
+        const rcChevron = document.getElementById('repeat-callers-chevron');
+        rcCollapse.addEventListener('show.bs.collapse', () => { rcChevron.textContent = '\u25BC'; });
+        rcCollapse.addEventListener('hide.bs.collapse', () => { rcChevron.textContent = '\u25B6'; });
+      }
+
+      if (permissions.stats || permissions.callLists) {
+        const datePicker = document.getElementById('stats-date-picker');
+        const todayStr = new Date().toISOString().split('T')[0];
+        datePicker.value = todayStr;
+        datePicker.max = todayStr;
+        datePicker.addEventListener('change', async (e) => {
+          const picked = e.target.value;
+          if (!picked) return;
+          if (isToday(picked)) {
+            selectedDate = null;
+            document.getElementById('stats-title').textContent = "Today's Stats";
+            try {
+              const data = await fetchStatsForDate(picked);
+              dashboardData.stats = data.stats;
+              dashboardData.callLists = data.callLists;
+              dashboardData.callCountByNumber = data.callCountByNumber;
+              dashboardData.repeatCallers = data.repeatCallers;
+            } catch (err) {
+              console.error('Failed to fetch today stats:', err);
+            }
+            renderStats();
+            renderCallList();
+            renderRepeatCallers();
+          } else {
+            selectedDate = picked;
+            const d = new Date(picked + 'T00:00:00');
+            const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            document.getElementById('stats-title').textContent = `Stats for ${formatted}`;
+            try {
+              const data = await fetchStatsForDate(picked);
+              dashboardData.stats = data.stats;
+              dashboardData.callLists = data.callLists;
+              dashboardData.callCountByNumber = data.callCountByNumber;
+              dashboardData.repeatCallers = data.repeatCallers;
+              renderStats();
+              renderCallList();
+              renderRepeatCallers();
+            } catch (err) {
+              console.error('Failed to fetch stats for date:', err);
+            }
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch user session:', e);
+  }
+  connectWebSocket();
 }
 
 // -- WebSocket connection with auto-reconnect --
@@ -278,11 +745,24 @@ function connectWebSocket() {
 
   ws.addEventListener('message', (event) => {
     try {
-      dashboardData = JSON.parse(event.data);
-      render();
+      const incoming = JSON.parse(event.data);
+      if (selectedDate) {
+        // Viewing a past date: update live sections only, preserve historical stats/callLists/repeatCallers
+        dashboardData.agents = incoming.agents;
+        dashboardData.queue = incoming.queue;
+        // Keep live callCountByNumber for agent/queue "Times Called" column
+        if (incoming.callCountByNumber) dashboardData.liveCallCountByNumber = incoming.callCountByNumber;
+        renderAgents();
+        renderQueue();
+        renderLive();
+      } else {
+        dashboardData = incoming;
+        render();
+      }
     } catch (e) {
       console.error('Failed to parse WebSocket message:', e);
     }
+    window.dispatchEvent(new CustomEvent('rcs:ws-update'));
   });
 
   ws.addEventListener('close', () => {
@@ -299,7 +779,47 @@ function connectWebSocket() {
   });
 }
 
-// Update ticking timers every 1 second
-setInterval(render, 1000);
-// Connect WebSocket
-connectWebSocket();
+// -- SuperAdmin Settings Panel --
+const FEATURE_LABELS = {
+  stats: 'Stats Grid',
+  callLists: 'Call Lists',
+  repeatCallers: 'Repeat Callers',
+  agentMetrics: 'Agent Metrics (Login, Calls, Outbound)',
+  callCountByNumber: 'Times Called Column',
+  reports: 'Reports',
+};
+
+const TIER_LABELS = {
+  all: 'All Users',
+  supervisors: 'Supervisors Only',
+  approvedUsers: 'Approved Users',
+  selfOnly: 'All Users (own data only)',
+};
+
+const FALLBACK_TIERS = ['all', 'supervisors', 'approvedUsers'];
+
+// Convert between seconds (API storage unit) and integer minutes (UI unit).
+// 89 sec → 1 min, 120 sec → 2 min. Rounds to nearest minute.
+const secToMin = (s) => Math.max(0, Math.round((Number(s) || 0) / 60));
+const minToSec = (m) => Math.max(0, Math.round(Number(m) || 0) * 60);
+
+// Update ticking timers every 1 second.
+// Tick paths only touch time-relative cells in place (no innerHTML), so a text
+// selection elsewhere in the table survives — needed so agents can copy/paste
+// names, phone numbers, SF case IDs, etc. Full renders fire on WS push.
+// renderStats / renderRepeatCallers have no ticking content and are intentionally
+// not called here; they redraw on the next WS push.
+setInterval(() => {
+  renderAgentsTick();
+  renderQueueTick();
+  renderLive();
+  if (!selectedDate) {
+    renderCallListTick();
+  }
+  // Queue stays live even while viewing a past date (the WS handler keeps
+  // agents/queue current), so this runs regardless of selectedDate.
+  window.rcs?.queueAlerts?.check(dashboardData.queue || []);
+}, 1000);
+// Load saved column preferences, then init
+loadColPrefs();
+init();

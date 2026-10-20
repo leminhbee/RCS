@@ -1,5 +1,4 @@
-const axios = require('axios');
-const AVA_URL = process.env.AVA_URL;
+const ava = require('./client');
 
 /**
  * Notify AVA of an outbound call so the agent can enter the case number themselves.
@@ -9,7 +8,7 @@ const AVA_URL = process.env.AVA_URL;
  * @param {string} callRecording - The call recording URL
  */
 const notify = async (callerNumber, callRecordId, slackId, callRecording) => {
-  const { data } = await axios.post(`${AVA_URL}/outbound/notify`, {
+  const { data } = await ava.post('/outbound/notify', {
     callerNumber,
     callRecordId,
     slackId,

@@ -1,9 +1,8 @@
-const axios = require('axios');
-const AVA_URL = process.env.AVA_URL;
+const ava = require('./client');
 
 const update = async (params) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/statuses/update`, params);
+    const { data } = await ava.post('/statuses/update', params);
     return data;
   } catch (error) {
     throw new Error('Error updating slack status: ' + error.message);

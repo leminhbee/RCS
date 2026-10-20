@@ -1,12 +1,11 @@
-const axios = require('axios');
+const axios = require('./client');
 const { createLogger } = require('../helpers/logger');
 const logger = createLogger();
-const atp_url = process.env.ATP_URL;
-const { validate: isUUID } = require('uuid'); // Import the UUID validation function
+const { validate: isUUID } = require('uuid');
 
 async function create(options) {
   try {
-    const response = await axios.post(`${atp_url}/calls`, options);
+    const response = await axios.post(`/calls`, options);
     return response.data;
   } catch (error) {
     logger.error({ error }, 'Error writing calls to database');
@@ -28,13 +27,13 @@ async function fetchOne(options) {
     let response;
     if (typeof options === 'object' && options !== null) {
       // User is providing a filter, so call the findOne endpoint
-      response = await axios.get(`${atp_url}/calls/findOne`, {
+      response = await axios.get(`/calls/findOne`, {
         params: { filter: options },
       });
       return response.data; // This will be the found object or null from the API
     } else if (typeof options === 'string' && isUUID(options)) {
       // User is providing a UUID, so call the specific ID endpoint
-      response = await axios.get(`${atp_url}/calls/${options}`);
+      response = await axios.get(`/calls/${options}`);
       return response.data; // This will be the found object
     } else {
       // Throw an error for invalid input
@@ -60,7 +59,7 @@ async function fetchOne(options) {
  */
 async function fetchAll(filter) {
   try {
-    const response = await axios.get(`${atp_url}/calls`, {
+    const response = await axios.get(`/calls`, {
       params: filter ? { filter } : {},
     });
     return response.data;
@@ -71,7 +70,7 @@ async function fetchAll(filter) {
 
 async function update(id, data) {
   try {
-    const response = await axios.patch(`${atp_url}/calls/${id}`, data);
+    const response = await axios.patch(`/calls/${id}`, data);
     return response.data;
   } catch (error) {
     logger.error({ error }, 'ATP Update Error');

@@ -6,20 +6,28 @@ const logger = createLogger('websocket');
 
 let wss = null;
 
-function init(server, dashboardKey) {
+function init(server, sessionMiddleware) {
   wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
 
-    if (url.pathname !== `/dashboard/${dashboardKey}/ws`) {
+    if (url.pathname !== '/dashboard/ws') {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
 
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
+    sessionMiddleware(request, {}, () => {
+      if (!request.session?.user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
     });
   });
 

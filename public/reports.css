@@ -1,0 +1,18 @@
+/* Nav separator */
+.ms-nav-separator { color: rgba(255,255,255,0.5); font-weight: 300; padding: 0 2px; }
+
+/* Chart containers */
+.chart-container { position: relative; width: 100%; height: 350px; }
+
+/* Chart controls */
+.chart-toggle { font-size: 0.75rem; }
+.chart-type-select { font-size: 0.75rem; }
+body.dark .chart-toggle,
+body.dark .chart-type-select { border-color: #2a3f55; color: #e0e8f0; background-color: #1a2d42; }
+body.dark .chart-toggle:hover { background: #0e1e2f; color: #e0e8f0; }
+
+/* Export buttons */
+body.dark #export-csv-btn,
+body.dark #export-pdf-btn { border-color: #2a3f55; color: #e0e8f0; }
+body.dark #export-csv-btn:hover,
+body.dark #export-pdf-btn:hover { background: #1a2d42; color: #e0e8f0; }

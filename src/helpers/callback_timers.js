@@ -5,7 +5,7 @@ const { createQueueLog } = require('./log_schema');
 
 const CALLBACK_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
 
-// In-memory map of callRecordId -> timerId
+// In-memory map of callRecordId -> { timer, expiresAt }
 const activeTimers = new Map();
 
 async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) {
@@ -13,6 +13,29 @@ async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) 
 
   const timer = setTimeout(async () => {
     try {
+      // Re-read current state before expiring. The call may have been answered,
+      // completed, or removed since the timer was armed, and the closure's copy
+      // of callRecord is stale by up to CALLBACK_TIMEOUT.
+      const current = await atp.calls.fetchOne(callRecord.id);
+
+      if (!current || current.status !== 'CALLBACK_REQUESTED') {
+        logger.info(
+          createQueueLog({
+            operation: 'callback',
+            subOperation: 'CALLBACK_EXPIRE_SKIPPED',
+            callerNumber: callRecord.callerNumber,
+            callId: callRecord.callId,
+            callRecordId: callRecord.id,
+            caseId: callRecord.salesforceCaseId,
+            data: {
+              message: 'Callback timer expired but call is no longer awaiting callback — no action taken',
+              currentStatus: current ? current.status : 'NOT_FOUND',
+            },
+          })
+        );
+        return;
+      }
+
       await atp.calls.update(callRecord.id, {
         status: 'CALLBACK_FAILED',
         endTime: new Date(),
@@ -59,19 +82,27 @@ async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) 
     }
   }, delay);
 
-  activeTimers.set(callRecord.id, timer);
+  activeTimers.set(callRecord.id, { timer, expiresAt: new Date(Date.now() + delay) });
 }
 
 function clearCallbackTimer(callRecordId) {
-  const timer = activeTimers.get(callRecordId);
-  if (timer) {
-    clearTimeout(timer);
+  const entry = activeTimers.get(callRecordId);
+  if (entry) {
+    clearTimeout(entry.timer);
     activeTimers.delete(callRecordId);
   }
 }
 
 function hasCallbackTimer(callRecordId) {
   return activeTimers.has(callRecordId);
+}
+
+// When this record's callback timer is due to fire, as an ISO string, or null
+// when no timer is armed. The dashboard renders those two cases differently: a
+// running countdown resolves itself, an unarmed callback sits until someone acts.
+function getCallbackExpiry(callRecordId) {
+  const entry = activeTimers.get(callRecordId);
+  return entry ? entry.expiresAt.toISOString() : null;
 }
 
 async function checkCallbackQueue(logger) {
@@ -97,7 +128,7 @@ async function checkCallbackQueue(logger) {
 }
 
 async function recoverCallbackTimers(logger) {
-  const users = await atp.users.fetchAll({ callsActive: true });
+  const users = await atp.users.fetchAll({ callsActive: true, active: true });
   const hasAvailableAgent = users.some(
     (u) => u.currentStatus === 'AVAILABLE' && !u.supervisor
   );
@@ -111,6 +142,7 @@ module.exports = {
   startCallbackTimer,
   clearCallbackTimer,
   hasCallbackTimer,
+  getCallbackExpiry,
   checkCallbackQueue,
   recoverCallbackTimers,
 };
