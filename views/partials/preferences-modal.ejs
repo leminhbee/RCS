@@ -22,6 +22,47 @@
           </div>
           <div class="preferences-hint">Warn me this many minutes before my 60-minute lunch ends.</div>
         </div>
+        <!-- Supervisors only; revealed by preferences-panel.js once the user loads. -->
+        <div id="preferences-queue-alerts" style="display:none">
+          <hr class="preferences-divider">
+          <div class="preferences-row">
+            <label class="preferences-check">
+              <input type="checkbox" id="pref-queue-alerts-enabled">
+              <span>Queue alerts (desktop notifications)</span>
+            </label>
+            <button type="button" class="btn btn-outline-secondary btn-sm preferences-test-btn" id="pref-queue-alerts-test">Test alert</button>
+            <div class="preferences-hint" id="pref-queue-alerts-status"></div>
+          </div>
+          <div class="preferences-row">
+            <label class="preferences-label" for="pref-queue-depth">Queue depth alert</label>
+            <div class="preferences-input-wrap">
+              <input type="number" min="1" max="100" step="1" class="form-control form-control-sm" id="pref-queue-depth">
+              <span class="preferences-unit">calls</span>
+            </div>
+            <div class="preferences-hint">Notify me when this many callers are waiting (1 alerts on a single caller).</div>
+          </div>
+          <div class="preferences-row">
+            <label class="preferences-label" for="pref-queue-wait">Long wait alert</label>
+            <div class="preferences-input-wrap">
+              <input type="number" min="1" max="60" step="1" class="form-control form-control-sm" id="pref-queue-wait">
+              <span class="preferences-unit">min</span>
+            </div>
+            <div class="preferences-hint">Notify me once a caller has waited this long.</div>
+          </div>
+          <div class="preferences-row">
+            <label class="preferences-check">
+              <input type="checkbox" id="pref-queue-sound">
+              <span>Play a sound with the alert</span>
+            </label>
+          </div>
+          <div class="preferences-row">
+            <label class="preferences-check">
+              <input type="checkbox" id="pref-queue-sticky">
+              <span>Keep alerts on screen until dismissed</span>
+            </label>
+            <div class="preferences-hint">Otherwise they fade after a few seconds. Chrome and Edge honor this; Firefox and Safari dismiss on their own regardless.</div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer d-flex justify-content-between align-items-center">
         <span id="preferences-feedback" class="settings-feedback"></span>

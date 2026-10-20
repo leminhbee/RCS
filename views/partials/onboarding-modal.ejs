@@ -1,0 +1,57 @@
+<div class="modal fade" id="onboarding-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add New Hire</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Step 1: who is this -->
+        <div id="onboarding-step-identity">
+          <p class="onboarding-intro">
+            Enter their name and work email. We'll look up their IDs in RingCX, RingEX, Salesforce and Slack, then you confirm before anything is saved.
+          </p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="onboarding-first">First name</label>
+              <input type="text" class="form-control" id="onboarding-first" autocomplete="off">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="onboarding-last">Last name</label>
+              <input type="text" class="form-control" id="onboarding-last" autocomplete="off">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="onboarding-email">Work email</label>
+              <input type="email" class="form-control" id="onboarding-email" autocomplete="off" placeholder="first.last@alula.net">
+              <div class="form-text">Use the address their Microsoft account signs in with — it's what binds SSO on their first login.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: what we found -->
+        <div id="onboarding-step-confirm" style="display:none">
+          <div id="onboarding-summary" class="onboarding-summary"></div>
+          <div id="onboarding-warnings"></div>
+          <table class="table table-sm onboarding-table">
+            <thead><tr><th>Field</th><th>Value</th><th>Source</th></tr></thead>
+            <tbody id="onboarding-fields"></tbody>
+          </table>
+          <div class="onboarding-flags">
+            <div class="onboarding-flags-title">Permissions</div>
+            <div id="onboarding-flag-list" class="onboarding-flag-list"></div>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center">
+        <span id="onboarding-feedback" class="settings-feedback"></span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="onboarding-back-btn" style="display:none">Back</button>
+          <button type="button" class="btn btn-primary btn-sm" id="onboarding-lookup-btn">Look up</button>
+          <button type="button" class="btn btn-success btn-sm" id="onboarding-create-btn" style="display:none">Create user</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

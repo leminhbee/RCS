@@ -1,9 +1,8 @@
-const axios = require('axios');
+const ava = require('./client');
 const { createLogger } = require('../helpers/logger');
 const { createQueueLog, formatError } = require('../helpers/log_schema');
 const logger = createLogger('queue');
 
-const AVA_URL = process.env.AVA_URL;
 
 /**
  * Add caller to AVA queue
@@ -12,7 +11,7 @@ const AVA_URL = process.env.AVA_URL;
  */
 const add = async (callerNumber, messageId) => {
   try {
-    const results = await axios.post(`${AVA_URL}/queue/add`);
+    const results = await ava.post('/queue/add');
 
     logger.info(
       createQueueLog({
@@ -47,7 +46,7 @@ const add = async (callerNumber, messageId) => {
  */
 const remove = async (callerNumber, messageId, reason, body) => {
   try {
-    const results = await axios.post(`${AVA_URL}/queue/remove`);
+    const results = await ava.post('/queue/remove');
 
     logger.info(
       createQueueLog({

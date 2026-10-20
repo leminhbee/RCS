@@ -5,7 +5,7 @@ const { createQueueLog } = require('./log_schema');
 
 const CALLBACK_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
 
-// In-memory map of callRecordId -> timerId
+// In-memory map of callRecordId -> { timer, expiresAt }
 const activeTimers = new Map();
 
 async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) {
@@ -82,19 +82,27 @@ async function startCallbackTimer(callRecord, logger, delay = CALLBACK_TIMEOUT) 
     }
   }, delay);
 
-  activeTimers.set(callRecord.id, timer);
+  activeTimers.set(callRecord.id, { timer, expiresAt: new Date(Date.now() + delay) });
 }
 
 function clearCallbackTimer(callRecordId) {
-  const timer = activeTimers.get(callRecordId);
-  if (timer) {
-    clearTimeout(timer);
+  const entry = activeTimers.get(callRecordId);
+  if (entry) {
+    clearTimeout(entry.timer);
     activeTimers.delete(callRecordId);
   }
 }
 
 function hasCallbackTimer(callRecordId) {
   return activeTimers.has(callRecordId);
+}
+
+// When this record's callback timer is due to fire, as an ISO string, or null
+// when no timer is armed. The dashboard renders those two cases differently: a
+// running countdown resolves itself, an unarmed callback sits until someone acts.
+function getCallbackExpiry(callRecordId) {
+  const entry = activeTimers.get(callRecordId);
+  return entry ? entry.expiresAt.toISOString() : null;
 }
 
 async function checkCallbackQueue(logger) {
@@ -134,6 +142,7 @@ module.exports = {
   startCallbackTimer,
   clearCallbackTimer,
   hasCallbackTimer,
+  getCallbackExpiry,
   checkCallbackQueue,
   recoverCallbackTimers,
 };

@@ -1,9 +1,8 @@
-const axios = require('axios');
-const AVA_URL = process.env.AVA_URL;
+const ava = require('./client');
 
 const post = async (payload) => {
   try {
-    const { data } = await axios.post(`${AVA_URL}/tracked-issues`, payload);
+    const { data } = await ava.post('/tracked-issues', payload);
     return data;
   } catch (error) {
     throw new Error('Error posting tracked issue to Slack canvas: ' + error.message);
@@ -24,7 +23,7 @@ const destroySections = async (canvasSectionId) => {
   if (!ids.length) return { ok: false, error: 'no sectionIds provided' };
   const joined = ids.map(encodeURIComponent).join(',');
   try {
-    const { data } = await axios.delete(`${AVA_URL}/tracked-issues/sections/${joined}`);
+    const { data } = await ava.delete(`/tracked-issues/sections/${joined}`);
     return data;
   } catch (error) {
     throw new Error('Error deleting tracked issue sections from Slack canvas: ' + error.message);
@@ -33,7 +32,7 @@ const destroySections = async (canvasSectionId) => {
 
 const patch = async (mapping, updates) => {
   try {
-    const { data } = await axios.patch(`${AVA_URL}/tracked-issues/canvas`, { mapping, updates });
+    const { data } = await ava.patch('/tracked-issues/canvas', { mapping, updates });
     return data;
   } catch (error) {
     throw new Error('Error patching tracked issue in Slack canvas: ' + error.message);

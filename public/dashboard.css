@@ -129,6 +129,9 @@ body.dark .announcement-list-item .ann-ack-details { border-top-color: #1a2d42; 
 .status-login { background: #f3f4f6; color: #6b7280; }
 .supervisor-tag { font-size: 0.7rem; background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }
 .callback-tag { font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; }
+.callback-timer { font-size: 0.75rem; font-variant-numeric: tabular-nums; margin-left: 6px; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; }
+.callback-timer.urgent { background: #fee2e2; color: #991b1b; }
+.callback-timer.none { background: #e5e7eb; color: #6b7280; font-variant-numeric: normal; }
 .tz-toggle { font-size: 0.65rem; background: #e5e7eb; color: #374151; padding: 1px 5px; border-radius: 3px; margin-left: 4px; cursor: pointer; user-select: none; }
 .queue-remove-btn, .agent-call-clear-btn { background: none; border: none; color: #9ca3af; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .queue-remove-btn:hover, .agent-call-clear-btn:hover { background: #fee2e2; color: #dc2626; }
@@ -212,6 +215,9 @@ body.dark .status-wrap-up { background: #2d1050; color: #c084fc; }
 body.dark .status-login { background: #132133; color: #787676; }
 body.dark .supervisor-tag { background: #1779ba33; color: #037fff; }
 body.dark .callback-tag { background: #3d2e08; color: #ffae00; }
+body.dark .callback-timer { background: #1e2a5a; color: #a5b4fc; }
+body.dark .callback-timer.urgent { background: #4a1414; color: #fca5a5; }
+body.dark .callback-timer.none { background: #2a2a2a; color: #9ca3af; }
 body.dark .tz-toggle { background: #1a2d42; color: #787676; }
 body.dark .queue-remove-btn, body.dark .agent-call-clear-btn { color: #787676; }
 body.dark .queue-remove-btn:hover, body.dark .agent-call-clear-btn:hover { background: #4a1010; color: #f87171; }
@@ -580,7 +586,18 @@ body.dark .user-flags-tabs .nav-link.active { color: #f0f2f3; background: #13213
 .preferences-input-wrap .form-control { width: 90px; }
 .preferences-unit { color: #6b7280; font-size: 0.9rem; }
 .preferences-hint { color: #6b7280; font-size: 0.8rem; margin-top: 6px; }
+.preferences-status-ok { color: #16a34a !important; }
+.preferences-status-warn { color: #ca8a04 !important; }
+.preferences-status-bad { color: #dc2626 !important; }
+/* Thresholds are disabled while the master switch is off — dim them so they read
+   as inactive rather than broken. The switch's own row (the first) stays lit. */
+.preferences-block-off .preferences-row:not(:first-of-type) { opacity: 0.55; }
+.preferences-check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin: 0; cursor: pointer; }
+.preferences-check input { cursor: pointer; }
+.preferences-test-btn { margin-left: 12px; vertical-align: middle; }
+.preferences-divider { margin: 4px 0 0; border: none; border-top: 1px solid #e5e7eb; }
 body.dark .preferences-row { border-bottom-color: #2a3f55; }
+body.dark .preferences-divider { border-top-color: #2a3f55; }
 body.dark .preferences-unit, body.dark .preferences-hint { color: #8899aa; }
 
 /* ---------- Tracked issues ticker ---------- */
@@ -998,3 +1015,29 @@ body.dark input[type="file"].form-control::file-selector-button:hover,
 body.dark input[type="file"].form-control-sm::file-selector-button:hover {
   background: #2d4a6e;
 }
+
+/* ---------- Onboarding (Add New Hire) ---------- */
+.onboarding-intro { color: #6b7280; font-size: 0.9rem; margin-bottom: 1rem; }
+.onboarding-summary { font-size: 1rem; margin-bottom: 0.75rem; }
+.onboarding-warn { background: #fef3c7; color: #92400e; border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; margin-bottom: 8px; }
+.onboarding-warn.danger { background: #fee2e2; color: #991b1b; }
+.onboarding-table { margin-bottom: 1rem; }
+.onboarding-table td { vertical-align: middle; }
+.onboarding-label { white-space: nowrap; font-weight: 600; font-size: 0.85rem; }
+.onboarding-source { font-size: 0.78rem; }
+.onboarding-detail { color: #6b7280; margin-top: 2px; }
+.onboarding-conf { font-weight: 600; }
+.onboarding-conf.ok { color: #16a34a; }
+.onboarding-conf.warn { color: #ca8a04; }
+.onboarding-conf.none { color: #9ca3af; }
+.onboarding-alt { margin-top: 4px; }
+.onboarding-flags-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 6px; }
+.onboarding-flag-list { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.onboarding-flag { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; margin: 0; }
+.onboarding-flag input { cursor: pointer; }
+.settings-feedback.ok { color: #16a34a; }
+.settings-feedback.error { color: #dc2626; }
+body.dark .onboarding-intro, body.dark .onboarding-detail { color: #8899aa; }
+body.dark .onboarding-warn { background: #3d2e08; color: #ffae00; }
+body.dark .onboarding-warn.danger { background: #4a1414; color: #fca5a5; }
+body.dark .onboarding-conf.none { color: #787676; }

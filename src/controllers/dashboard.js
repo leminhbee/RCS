@@ -1,7 +1,7 @@
 const atp = require('../ATP');
 const { sfdcConn } = require('../config/sfdc');
 const { broadcast } = require('../helpers/websocket');
-const { clearCallbackTimer } = require('../helpers/callback_timers');
+const { clearCallbackTimer, getCallbackExpiry } = require('../helpers/callback_timers');
 const { getVisibilityConfig, canAccess, getPermissions } = require('../helpers/dashboardAccess');
 
 const OFFLINE_STATUSES = [null, 'LOGOUT', 'OFF-LINE'];
@@ -105,6 +105,8 @@ const fetchDashboardData = async (date) => {
       companyName: c.companyName,
       startTime: c.startTime,
       callbackRequested: c.status === 'CALLBACK_REQUESTED',
+      // Null when no timer is armed — the queue row distinguishes the two.
+      callbackExpiresAt: c.status === 'CALLBACK_REQUESTED' ? getCallbackExpiry(c.id) : null,
       ringing: c.status === 'RINGING',
     }));
 
