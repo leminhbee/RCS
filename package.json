@@ -6,6 +6,9 @@
   "author": "",
   "type": "commonjs",
   "main": "index.js",
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "start": "pm2 start ./src/index.js --name RCS --output ~/RCS/LOGS/out.log --error ~/RCS/LOGS/error.log",
     "restart": "pm2 reload RCS --update-env",
